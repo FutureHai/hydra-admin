@@ -1,0 +1,72 @@
+server:
+  bind_address: "127.0.0.1"
+  port: 8085
+  # 管理台的浏览器访问根地址；不是 Hydra issuer。
+  public_base_url: "https://<ADMIN_CONSOLE_FQDN>"
+  trusted_proxy_cidrs:
+    - "127.0.0.1/32"
+  read_timeout: 15s
+  read_header_timeout: 5s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+hydra:
+  # 常见单机示例；Admin API 必须通过受限网络供本应用访问，不支持额外网关认证。
+  # 多个副本共用同一 Hydra 数据库、版本、issuer 与密钥；名称会显示在状态页。
+  # 单副本旧配置 admin_base_url 仍可用，但不能与 admin_replicas 同时填写。
+  admin_replicas:
+    - name: "hydra-a"
+      admin_base_url: "http://127.0.0.1:4445"
+    # - name: "hydra-b"
+    #   admin_base_url: "https://hydra-b.internal.example:4445"
+  # 仅在启用 Token revoke 时填写；它可能与 issuer 相同，不能猜测。
+  public_api_base_url: ""
+  timeout: 10s
+  token_revoke_enabled: false
+
+# 可选。为每个 Audience 配置可选 Scope；Scope 值只能属于一个 Audience。
+# 未配置时，Client 表单继续独立编辑 Scope 和 Audience。
+# resource_catalog:
+#   global_scopes: ["openid", "offline"]
+#   audiences:
+#     - audience: "https://api.example.com/orders"
+#       scopes: ["orders.read", "orders.write"]
+#     - audience: "https://api.example.com/billing"
+#       scopes: ["billing.read"]
+
+auth:
+  username: "admin"
+  # 支持 bcrypt 或 Argon2id PHC 编码。以下是假值，不可用于登录。
+  password_hash: "$argon2id$v=19$m=65536,t=3,p=2$REPLACE_WITH_BASE64_SALT$REPLACE_WITH_BASE64_HASH"
+  session_ttl: 8h
+  session_cookie_name: "hydra_admin_session"
+  max_sessions: 20
+  login:
+    window: 15m
+    max_attempts_per_ip: 10
+    max_attempts_per_username: 5
+    lockout_duration: 15m
+
+security:
+  csrf_header_name: "X-CSRF-Token"
+  # 生产环境必须为 true；仅当管理台 URL 与监听地址均为回环 HTTP 时允许 false。
+  cookie_secure: true
+  cookie_same_site: "lax"
+  api_rate_limit:
+    read_per_minute_per_ip: 120
+    write_per_minute_per_ip: 30
+  request_body_max_bytes: 1048576
+
+audit:
+  path: "./logs/audit.jsonl"
+  max_file_bytes: 10485760
+  max_archives: 14
+  file_mode: "0600"
+
+log:
+  level: "info"
+  format: "json"
+  path: "./logs/hydra-admin.log"
+  max_file_bytes: 10485760
+  max_archives: 14
+  file_mode: "0600"

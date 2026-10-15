@@ -1,0 +1,2 @@
+Build the React frontend with scripts/build-web.sh before running the server.
+This placeholder keeps go:embed valid in a fresh checkout.

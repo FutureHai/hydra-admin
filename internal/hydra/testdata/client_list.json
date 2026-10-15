@@ -1,0 +1,4 @@
+[
+  {"client_id":"fixture-web","client_name":"Fixture Web","grant_types":["authorization_code"],"scope":"openid","future_flag":{"enabled":true},"client_secret":"fixture-secret-never-print"},
+  {"client_id":"fixture-sparse"}
+]

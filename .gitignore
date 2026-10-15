@@ -1,0 +1,13 @@
+/web/node_modules/
+/web/dist/
+/web/test-results/
+/web/playwright-report/
+/assets/dist/*
+!/assets/dist/BUILD_WEB_FIRST.txt
+/dist/
+/logs/
+/config.yaml
+/hydra-admin
+/*.local.yaml
+/.DS_Store
+/.idea/

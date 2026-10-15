@@ -1,0 +1,1 @@
+{"client_id":"fixture-web","client_name":"Fixture Web","grant_types":["authorization_code"],"scope":"openid","audience":["api"],"future_flag":{"enabled":true,"access_token":"nested-sensitive"},"client_secret":"fixture-secret-never-print","registration_access_token":"registration-sensitive","jwks":{"keys":[{"kty":"RSA","n":"public-material","d":"private-material"}]}}

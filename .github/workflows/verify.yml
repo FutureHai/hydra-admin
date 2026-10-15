@@ -1,0 +1,214 @@
+name: Verify and package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Placeholder-only Go checks and expected serve refusal
+        run: |
+          test -f assets/dist/BUILD_WEB_FIRST.txt
+          test ! -e assets/dist/index.html
+          go build -o /tmp/hydra-admin-placeholder ./cmd/hydra-admin
+          go test ./...
+          go test -race ./...
+          go vet ./...
+          if /tmp/hydra-admin-placeholder serve --config tests/fixtures/smoke-config.yaml > /tmp/placeholder.out 2>&1; then
+            echo 'placeholder-only service unexpectedly started' >&2
+            exit 1
+          fi
+          grep -F 'web assets are absent' /tmp/placeholder.out
+          mkdir -p /tmp/no-build-npm
+          printf '#!/bin/sh\nexit 0\n' > /tmp/no-build-npm/npm
+          chmod +x /tmp/no-build-npm/npm
+          if PATH="/tmp/no-build-npm:$PATH" ./scripts/build-web.sh; then
+            echo 'web build without index.html unexpectedly succeeded' >&2
+            exit 1
+          fi
+          test ! -e assets/dist/index.html
+      - name: Frontend unit and type checks
+        run: |
+          cd web
+          npm ci
+          npm run test
+          npm run typecheck
+      - name: Browser E2E against production assets and mock Hydra
+        run: |
+          cd web
+          npx playwright install --with-deps chromium
+          cd ..
+          ./tests/e2e/run.sh
+      - name: Build complete release
+        run: ./scripts/package-release.sh 0.1.0
+      - name: Embedded service SIGTERM and log durability
+        run: go test ./cmd/hydra-admin -run TestServeCompletesInFlightRequestOnSIGTERM -count=1 -v
+      - name: Verify release targets, archives and checksums
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import struct
+          import tarfile
+          import zipfile
+
+          dist = pathlib.Path('dist')
+          targets = ('linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'windows-amd64', 'windows-arm64')
+          for target in targets:
+              name = f'hydra-admin-v0.1.0-{target}'
+              binary = dist / name / ('hydra-admin.exe' if target.startswith('windows-') else 'hydra-admin')
+              data = binary.read_bytes()
+              if target.startswith('linux-'):
+                  assert data[:4] == b'\x7fELF'
+                  machine = struct.unpack_from('<H', data, 18)[0]
+                  assert machine == (62 if target.endswith('amd64') else 183)
+                  archive = dist / f'{name}.tar.gz'
+                  with tarfile.open(archive, 'r:gz') as package:
+                      assert f'{name}/licenses/MANIFEST.tsv' in package.getnames()
+              elif target.startswith('darwin-'):
+                  assert data[:4] == b'\xcf\xfa\xed\xfe'
+                  machine = struct.unpack_from('<I', data, 4)[0]
+                  assert machine == (0x01000007 if target.endswith('amd64') else 0x0100000c)
+                  archive = dist / f'{name}.tar.gz'
+                  with tarfile.open(archive, 'r:gz') as package:
+                      assert f'{name}/licenses/MANIFEST.tsv' in package.getnames()
+              else:
+                  assert data[:2] == b'MZ'
+                  pe_offset = struct.unpack_from('<I', data, 0x3c)[0]
+                  assert data[pe_offset:pe_offset+4] == b'PE\0\0'
+                  machine = struct.unpack_from('<H', data, pe_offset+4)[0]
+                  assert machine == (0x8664 if target.endswith('amd64') else 0xaa64)
+                  archive = dist / f'{name}.zip'
+                  with zipfile.ZipFile(archive) as package:
+                      assert package.testzip() is None
+                      assert f'{name}/licenses/MANIFEST.tsv' in package.namelist()
+              assert (dist / f'{name}' / 'config.yaml').is_file()
+              print(f'verified {target}: {binary.name}, {archive.name}')
+          PY
+          for release_dir in dist/hydra-admin-v0.1.0-{linux,darwin,windows}-{amd64,arm64}; do
+            (cd "$release_dir" && sha256sum -c SHA256SUMS)
+          done
+          (cd dist && sha256sum -c hydra-admin-v0.1.0-*.sha256)
+          file dist/hydra-admin-v0.1.0-linux-amd64/hydra-admin | tee /tmp/hydra-file.txt
+          grep -E 'ELF 64-bit.*x86-64.*statically linked' /tmp/hydra-file.txt
+          if ldd dist/hydra-admin-v0.1.0-linux-amd64/hydra-admin > /tmp/hydra-ldd.txt 2>&1; then
+            echo 'binary unexpectedly requires a dynamic loader' >&2
+            exit 1
+          fi
+          grep -E 'not a dynamic executable|statically linked' /tmp/hydra-ldd.txt
+          test -s assets/dist/index.html
+          test -s dist/hydra-admin-v0.1.0-linux-amd64/config.yaml
+          grep -F 'REPLACE_WITH_BASE64_HASH' dist/hydra-admin-v0.1.0-linux-amd64/config.yaml
+          test -s dist/hydra-admin-v0.1.0-linux-amd64/licenses/UPSTREAM_SOURCES.md
+          ! grep -F 'UPSTREAM_FILE_ABSENT' dist/hydra-admin-v0.1.0-linux-amd64/licenses/MANIFEST.tsv
+      - name: Clean Ubuntu 20.04 AMD64 runtime smoke
+        run: |
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD/dist/hydra-admin-v0.1.0-linux-amd64.tar.gz:/opt/hydra-admin-v0.1.0-linux-amd64.tar.gz:ro" \
+            -v "$PWD/dist/hydra-admin-v0.1.0-linux-amd64.tar.gz.sha256:/opt/hydra-admin-v0.1.0-linux-amd64.tar.gz.sha256:ro" \
+            -v "$PWD/tests/fixtures/smoke-config.yaml:/tmp/config.yaml:ro" \
+            -w /opt ubuntu:20.04 bash -euc '
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq file >/dev/null
+              sha256sum -c hydra-admin-v0.1.0-linux-amd64.tar.gz.sha256
+              mkdir -p /tmp/release
+              tar -xzf hydra-admin-v0.1.0-linux-amd64.tar.gz -C /tmp/release
+              cd /tmp/release/hydra-admin-v0.1.0-linux-amd64
+              sha256sum -c SHA256SUMS >/tmp/release-checksums.out
+              file ./hydra-admin | grep -E "ELF 64-bit.*x86-64.*statically linked"
+              if ldd ./hydra-admin >/tmp/ldd.txt 2>&1; then exit 1; fi
+              grep -E "not a dynamic executable|statically linked" /tmp/ldd.txt
+              ! command -v node
+              ! command -v go
+              ./hydra-admin version | grep -F "hydra-admin 0.1.0"
+              ./hydra-admin serve --config /tmp/config.yaml >/tmp/serve.out 2>&1 &
+              pid=$!
+              trap "kill -TERM $pid 2>/dev/null || true" EXIT
+              ready=0
+              for i in $(seq 1 60); do
+                if { exec 3<>/dev/tcp/127.0.0.1/8085; } 2>/dev/null; then
+                  printf "GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n" >&3
+                  IFS= read -r line <&3
+                  exec 3>&-
+                  if [[ $line == *"200 OK"* ]]; then ready=1; break; fi
+                fi
+                sleep 1
+              done
+              test "$ready" -eq 1 || { cat /tmp/serve.out; exit 1; }
+              kill -TERM "$pid"
+              wait "$pid"
+              trap - EXIT
+              test "$(stat -c %a /tmp/logs/audit.jsonl)" = 600
+              test "$(stat -c %a /tmp/logs/hydra-admin.log)" = 600
+            '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hydra-admin-cross-platform
+          path: |
+            dist/hydra-admin-v0.1.0-*.tar.gz
+            dist/hydra-admin-v0.1.0-*.zip
+            dist/hydra-admin-v0.1.0-*.sha256
+
+  macos-smoke:
+    needs: verify
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hydra-admin-cross-platform
+      - name: Verify and start native macOS binary
+        run: |
+          if [[ -d dist ]]; then cd dist; fi
+          case "$(uname -m)" in
+            x86_64) arch=amd64 ;;
+            arm64) arch=arm64 ;;
+            *) echo "unsupported macOS runner architecture" >&2; exit 1 ;;
+          esac
+          release="hydra-admin-v0.1.0-darwin-$arch"
+          shasum -a 256 -c "$release.tar.gz.sha256"
+          tar -xzf "$release.tar.gz"
+          (cd "$release" && shasum -a 256 -c SHA256SUMS)
+          "./$release/hydra-admin" version | grep -F 'hydra-admin 0.1.0'
+
+  windows-smoke:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hydra-admin-cross-platform
+      - name: Verify and start native Windows binary
+        shell: pwsh
+        run: |
+          if (Test-Path dist) { Set-Location dist }
+          $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+            'AMD64' { 'amd64' }
+            'ARM64' { 'arm64' }
+            default { throw "unsupported Windows runner architecture: $env:PROCESSOR_ARCHITECTURE" }
+          }
+          $release = "hydra-admin-v0.1.0-windows-$arch"
+          $archive = "$release.zip"
+          $expectedArchiveHash = (Get-Content "$archive.sha256" -Raw).Trim().Split(' ')[0]
+          $actualArchiveHash = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($actualArchiveHash -ne $expectedArchiveHash) { throw 'archive SHA-256 mismatch' }
+          Expand-Archive -Path $archive -DestinationPath .
+          Get-Content "$release/SHA256SUMS" | ForEach-Object {
+            if ($_ -notmatch '^([0-9a-f]{64})  (.+)$') { throw "invalid SHA256SUMS line: $_" }
+            $expected = $Matches[1]
+            $path = Join-Path $release $Matches[2]
+            if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $expected) { throw "file SHA-256 mismatch: $path" }
+          }
+          & "./$release/hydra-admin.exe" version | Select-String -SimpleMatch 'hydra-admin 0.1.0'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows binary failed to start' }
