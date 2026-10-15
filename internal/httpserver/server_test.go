@@ -154,6 +154,139 @@ func TestLoginLogoutSessionAndCSRFEndToEnd(t *testing.T) {
 	}
 }
 
+func TestLoginThroughRemoteHTTPProxy(t *testing.T) {
+	s, _ := testServer(t)
+	s.Config.Server.BindAddress = "10.0.0.12"
+	s.Config.Server.PublicBaseURL = "http://admin.example.test"
+	s.Config.Security.AllowInsecureHTTP = true
+	s.Login.PublicBaseURL = s.Config.Server.PublicBaseURL
+	proxies, err := auth.ParseTrustedCIDRs([]string{"10.0.0.11/32"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.proxies = proxies
+	requestVia := func(remote, method, target, body string, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, target, strings.NewReader(body))
+		r.RemoteAddr = remote
+		r.Header.Set("X-Forwarded-For", "198.51.100.9")
+		r.Header.Set("X-Forwarded-Proto", "http")
+		for _, cookie := range cookies {
+			r.AddCookie(cookie)
+		}
+		for name, value := range headers {
+			r.Header.Set(name, value)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if got := requestVia("10.0.0.99:50000", "GET", "/api/v1/auth/csrf", "", nil, nil); got.Code != http.StatusForbidden {
+		t.Fatalf("direct HTTP peer accepted: %d", got.Code)
+	}
+	csrf := requestVia("10.0.0.11:50000", "GET", "/api/v1/auth/csrf", "", nil, nil)
+	if csrf.Code != http.StatusOK {
+		t.Fatalf("proxy CSRF request: %d", csrf.Code)
+	}
+	var csrfBody struct {
+		Token string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(csrf.Body.Bytes(), &csrfBody); err != nil || csrfBody.Token == "" {
+		t.Fatalf("proxy CSRF token: %v", err)
+	}
+	login := requestVia("10.0.0.11:50000", "POST", "/api/v1/auth/login", `{"username":"admin","password":"test-only-password"}`,
+		csrf.Result().Cookies(), map[string]string{"Origin": "http://admin.example.test", "X-CSRF-Token": csrfBody.Token})
+	if login.Code != http.StatusOK {
+		t.Fatalf("proxy login: %d %s", login.Code, login.Body.String())
+	}
+	var session *http.Cookie
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Name == s.Config.Auth.SessionCookieName {
+			session = cookie
+		}
+	}
+	if session == nil || session.Secure || !session.HttpOnly || session.SameSite != http.SameSiteLaxMode {
+		t.Fatal("HTTP proxy session cookie attributes are invalid")
+	}
+	if got := requestVia("10.0.0.11:50000", "GET", "/api/v1/auth/session", "", []*http.Cookie{session}, nil); got.Code != http.StatusOK {
+		t.Fatalf("proxy session: %d", got.Code)
+	}
+	if got := requestVia("10.0.0.99:50000", "GET", "/api/v1/auth/session", "", []*http.Cookie{session}, nil); got.Code != http.StatusForbidden {
+		t.Fatalf("direct peer used proxy session: %d", got.Code)
+	}
+	sessionCSRF := requestVia("10.0.0.11:50000", "GET", "/api/v1/auth/csrf", "", []*http.Cookie{session}, nil)
+	if err := json.Unmarshal(sessionCSRF.Body.Bytes(), &csrfBody); err != nil || csrfBody.Token == "" {
+		t.Fatalf("proxy session CSRF token: %v", err)
+	}
+	logout := requestVia("10.0.0.11:50000", "POST", "/api/v1/auth/logout", "", []*http.Cookie{session},
+		map[string]string{"Origin": "http://admin.example.test", "X-CSRF-Token": csrfBody.Token})
+	if logout.Code != http.StatusNoContent {
+		t.Fatalf("proxy logout: %d %s", logout.Code, logout.Body.String())
+	}
+	if got := requestVia("10.0.0.11:50000", "GET", "/api/v1/auth/session", "", []*http.Cookie{session}, nil); got.Code != http.StatusUnauthorized {
+		t.Fatalf("proxy session survived logout: %d", got.Code)
+	}
+}
+
+func TestLoginThroughPrivateIPDirect(t *testing.T) {
+	s, _ := testServer(t)
+	s.Config.Server.BindAddress = "10.0.0.12"
+	s.Config.Server.PublicBaseURL = "http://10.0.0.12:8085"
+	s.Config.Security.AllowInsecureHTTP = true
+	s.Login.PublicBaseURL = s.Config.Server.PublicBaseURL
+	requestDirect := func(method, target, body string, cookies []*http.Cookie, headers map[string]string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, target, strings.NewReader(body))
+		r.RemoteAddr = "10.0.0.55:50000"
+		for _, cookie := range cookies {
+			r.AddCookie(cookie)
+		}
+		for name, value := range headers {
+			r.Header.Set(name, value)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	csrf := requestDirect("GET", "/api/v1/auth/csrf", "", nil, nil)
+	if csrf.Code != http.StatusOK {
+		t.Fatalf("direct CSRF request: %d", csrf.Code)
+	}
+	var csrfBody struct {
+		Token string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(csrf.Body.Bytes(), &csrfBody); err != nil || csrfBody.Token == "" {
+		t.Fatalf("direct CSRF token: %v", err)
+	}
+	login := requestDirect("POST", "/api/v1/auth/login", `{"username":"admin","password":"test-only-password"}`,
+		csrf.Result().Cookies(), map[string]string{"Origin": "http://10.0.0.12:8085", "X-CSRF-Token": csrfBody.Token})
+	if login.Code != http.StatusOK {
+		t.Fatalf("direct login: %d %s", login.Code, login.Body.String())
+	}
+	var session *http.Cookie
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Name == s.Config.Auth.SessionCookieName {
+			session = cookie
+		}
+	}
+	if session == nil || session.Secure || !session.HttpOnly || session.SameSite != http.SameSiteLaxMode {
+		t.Fatal("direct HTTP session cookie attributes are invalid")
+	}
+	if got := requestDirect("GET", "/api/v1/auth/session", "", []*http.Cookie{session}, nil); got.Code != http.StatusOK {
+		t.Fatalf("direct session: %d", got.Code)
+	}
+	sessionCSRF := requestDirect("GET", "/api/v1/auth/csrf", "", []*http.Cookie{session}, nil)
+	if err := json.Unmarshal(sessionCSRF.Body.Bytes(), &csrfBody); err != nil || csrfBody.Token == "" {
+		t.Fatalf("direct session CSRF token: %v", err)
+	}
+	logout := requestDirect("POST", "/api/v1/auth/logout", "", []*http.Cookie{session},
+		map[string]string{"Origin": "http://10.0.0.12:8085", "X-CSRF-Token": csrfBody.Token})
+	if logout.Code != http.StatusNoContent {
+		t.Fatalf("direct logout: %d %s", logout.Code, logout.Body.String())
+	}
+	if got := requestDirect("GET", "/api/v1/auth/session", "", []*http.Cookie{session}, nil); got.Code != http.StatusUnauthorized {
+		t.Fatalf("direct session survived logout: %d", got.Code)
+	}
+}
+
 func TestUnsupportedVersionKeepsLoginAndStatusButClosesBusiness(t *testing.T) {
 	s, _ := testServer(t)
 	s.HydraReport = hydra.Report{Status: "unsupported_version", SupportedVersion: hydra.Version26, SpecSHA256: hydra.SpecSHA26,

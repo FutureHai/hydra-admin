@@ -65,6 +65,12 @@ func trusted(ip net.IP, ranges []*net.IPNet) bool {
 	return false
 }
 
+// TrustedPeer checks the direct TCP peer, before any forwarded headers are read.
+func TrustedPeer(remoteAddr string, ranges []*net.IPNet) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	return err == nil && trusted(net.ParseIP(host), ranges)
+}
+
 // ResolveClient walks X-Forwarded-For from right to left only while each hop is trusted.
 // A trusted edge proxy must overwrite untrusted client-supplied forwarded headers.
 func ResolveClient(remoteAddr string, tls bool, forwardedFor, forwardedProto string, trustedRanges []*net.IPNet) (net.IP, string, error) {

@@ -65,10 +65,11 @@ type Config struct {
 		} `yaml:"login"`
 	} `yaml:"auth"`
 	Security struct {
-		CSRFHeaderName string `yaml:"csrf_header_name"`
-		CookieSecure   bool   `yaml:"cookie_secure"`
-		CookieSameSite string `yaml:"cookie_same_site"`
-		APIRateLimit   struct {
+		CSRFHeaderName    string `yaml:"csrf_header_name"`
+		CookieSecure      bool   `yaml:"cookie_secure"`
+		CookieSameSite    string `yaml:"cookie_same_site"`
+		AllowInsecureHTTP bool   `yaml:"allow_insecure_http"`
+		APIRateLimit      struct {
 			ReadPerMinutePerIP  int `yaml:"read_per_minute_per_ip"`
 			WritePerMinutePerIP int `yaml:"write_per_minute_per_ip"`
 		} `yaml:"api_rate_limit"`
@@ -210,13 +211,26 @@ func (c *Config) Validate(configDir string) error {
 	if public.Path != "" && public.Path != "/" {
 		return errors.New("server.public_base_url must be an origin URL")
 	}
+	httpDirect, httpProxy := false, false
 	if public.Scheme == "http" {
-		if !bind.IsLoopback() || !literalLoopback(public.Hostname()) || c.Security.CookieSecure {
-			return errors.New("HTTP console URL requires loopback bind, loopback URL and cookie_secure=false")
+		if c.Security.CookieSecure {
+			return errors.New("HTTP console URL requires cookie_secure=false")
 		}
-	} else if !c.Security.CookieSecure {
-		return errors.New("HTTPS console URL requires cookie_secure=true")
+		switch {
+		case bind.IsLoopback() && literalLoopback(public.Hostname()):
+		case !c.Security.AllowInsecureHTTP:
+			return errors.New("non-loopback HTTP console URL requires allow_insecure_http=true")
+		case privateHTTPDirect(bind, public, c.Server.Port):
+			httpDirect = true
+		case !bind.IsLoopback() && !literalLoopback(public.Hostname()):
+			httpProxy = true
+		default:
+			return errors.New("HTTP console bind and URL are incompatible")
+		}
+	} else if c.Security.AllowInsecureHTTP || !c.Security.CookieSecure {
+		return errors.New("HTTPS console URL requires cookie_secure=true and allow_insecure_http=false")
 	}
+	hasRemoteProxy := false
 	for _, cidr := range c.Server.TrustedProxyCIDRs {
 		_, network, err := net.ParseCIDR(cidr)
 		if err != nil {
@@ -225,6 +239,19 @@ func (c *Config) Validate(configDir string) error {
 		if bind.IsLoopback() && !network.IP.IsLoopback() {
 			return errors.New("remote trusted proxy cannot reach loopback bind_address")
 		}
+		if httpDirect && !network.IP.IsLoopback() {
+			return errors.New("insecure HTTP direct must not trust remote proxy CIDRs")
+		}
+		if httpProxy && !network.IP.IsLoopback() {
+			ones, bits := network.Mask.Size()
+			if ones != bits {
+				return errors.New("insecure HTTP proxy requires host-specific trusted_proxy_cidrs")
+			}
+			hasRemoteProxy = true
+		}
+	}
+	if httpProxy && !hasRemoteProxy {
+		return errors.New("insecure HTTP proxy requires a non-loopback trusted proxy IP")
 	}
 	for _, item := range []struct {
 		name     string
@@ -322,6 +349,30 @@ func validURL(raw string) (*url.URL, error) {
 		}
 	}
 	return u, nil
+}
+
+func privateHTTPDirect(bind net.IP, public *url.URL, port int) bool {
+	if bind == nil || public == nil || public.Scheme != "http" || !bind.IsPrivate() {
+		return false
+	}
+	publicIP := net.ParseIP(public.Hostname())
+	publicPort := public.Port()
+	if publicPort == "" {
+		publicPort = "80"
+	}
+	return publicIP != nil && publicIP.Equal(bind) && publicPort == strconv.Itoa(port)
+}
+
+// HTTPProxyOnly reports whether non-loopback HTTP access must arrive from a trusted proxy.
+// Call it only after validating the configuration.
+func (c *Config) HTTPProxyOnly() bool {
+	if !c.Security.AllowInsecureHTTP {
+		return false
+	}
+	public, err := url.Parse(c.Server.PublicBaseURL)
+	bind := net.ParseIP(c.Server.BindAddress)
+	return err == nil && public != nil && public.Scheme == "http" && bind != nil && !bind.IsLoopback() &&
+		!literalLoopback(public.Hostname()) && !privateHTTPDirect(bind, public, c.Server.Port)
 }
 
 func validHydraURL(raw string) (*url.URL, error) {

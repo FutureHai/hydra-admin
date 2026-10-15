@@ -52,6 +52,10 @@ func (s *Server) recovery() gin.HandlerFunc {
 
 func (s *Server) proxy() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if s.Config.HTTPProxyOnly() && !auth.TrustedPeer(c.Request.RemoteAddr, s.proxies) {
+			s.fail(c, http.StatusForbidden, "untrusted_proxy", "仅允许可信代理访问")
+			return
+		}
 		ip, scheme, err := auth.ResolveClient(c.Request.RemoteAddr, c.Request.TLS != nil, c.GetHeader("X-Forwarded-For"), c.GetHeader("X-Forwarded-Proto"), s.proxies)
 		if err != nil {
 			s.fail(c, http.StatusBadRequest, "bad_request", "代理头无效")

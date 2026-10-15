@@ -49,8 +49,10 @@ auth:
 
 security:
   csrf_header_name: "X-CSRF-Token"
-  # 生产环境必须为 true；仅当管理台 URL 与监听地址均为回环 HTTP 时允许 false。
+  # HTTPS 为 true；HTTP 为 false。
   cookie_secure: true
+  # 默认关闭。非回环 HTTP 时显式开启；根据 URL、监听 IP 和可信代理自动判定直连或代理。
+  allow_insecure_http: false
   cookie_same_site: "lax"
   api_rate_limit:
     read_per_minute_per_ip: 120

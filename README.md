@@ -68,7 +68,7 @@ Get-Content SHA256SUMS | ForEach-Object {
 
 ### 配置并启动
 
-在**解压后的包目录**先生成密码哈希，再编辑 `config.yaml`。至少设置 `server.public_base_url`（浏览器访问管理台的根地址）、`hydra.admin_replicas` 中的 Admin 地址和 `auth.password_hash`。`hash-password` 会在交互终端静默读取两次密码；把输出的哈希填入配置，示例哈希不能登录。单机本地试用可将 `server.public_base_url` 设为 `http://127.0.0.1:8085`，保持 `server.bind_address: "127.0.0.1"`，并设 `security.cookie_secure: false`。其他访问方式请使用 HTTPS 和安全 Cookie；普通 HTTP 的非回环 IP 地址会被配置校验拒绝。Hydra Admin API 需从运行管理台的机器可达，且应限制在可信网络。
+在**解压后的包目录**先生成密码哈希，再编辑 `config.yaml`。至少设置 `server.public_base_url`（浏览器访问管理台的根地址）、`hydra.admin_replicas` 中的 Admin 地址和 `auth.password_hash`。`hash-password` 会在交互终端静默读取两次密码；把输出的哈希填入配置，示例哈希不能登录。程序根据浏览器地址、监听 IP 和可信代理自动判断访问方式；非回环 HTTP 只需显式设置 `security.allow_insecure_http: true`。Hydra Admin API 需从运行管理台的机器可达，且应限制在可信网络。
 
 ```bash
 chmod 600 config.yaml
@@ -83,6 +83,66 @@ chmod 600 config.yaml
 ```
 
 Windows 在 PowerShell 中运行 `.\hydra-admin.exe hash-password`，把哈希写入 `config.yaml` 并限制该文件的访问权限，再执行 `.\hydra-admin.exe check --config .\config.yaml` 和 `.\hydra-admin.exe serve --config .\config.yaml`。`check` 只执行本地配置检查和 Hydra 只读探测；成功后，在浏览器打开 `server.public_base_url`。
+
+访问方式共用同一组配置字段：
+
+| 浏览器访问方式 | `bind_address` | `public_base_url` | `trusted_proxy_cidrs` | `cookie_secure` | `allow_insecure_http` |
+| --- | --- | --- | --- | --- | --- |
+| 本机回环 HTTP | `127.0.0.1` | `http://127.0.0.1:8085` | `[]` | `false` | `false` |
+| 单机内网 IP 直连 | 管理台私有 IP | `http://同一私有IP:8085` | `[]` | `false` | `true` |
+| 跨服务器 HTTP 代理 | 管理台内网 IP | `http://浏览器访问域名` | 代理源 IP `/32` | `false` | `true` |
+| HTTPS 代理 | 管理台内网 IP | `https://浏览器访问域名` | 代理源 IP CIDR | `true` | `false` |
+
+### 单机内网 IP 与端口直连
+
+管理台和 Hydra 安装在同一台服务器，浏览器能直接访问管理台服务器的私有 IP 时，可在 `config.yaml` 中设置以下字段。示例中的 `10.0.0.12` 要替换为该服务器实际的内网 IP；访问地址中的 IP 和端口必须与监听地址及端口一致：
+
+```yaml
+server:
+  bind_address: "10.0.0.12"
+  port: 8085
+  public_base_url: "http://10.0.0.12:8085"
+  trusted_proxy_cidrs: []
+security:
+  cookie_secure: false
+  allow_insecure_http: true
+```
+
+其余字段沿用示例配置。此模式仅接受私有 IP，不接受公网 IP、域名或不同端口；请用防火墙只允许需要访问管理台的内网网段连接 8085。HTTP 会明文传输登录密码和会话 Cookie。使用包含此配置项的二进制，运行 `./hydra-admin check --config ./config.yaml` 验证。
+
+### 跨服务器 HTTP Nginx 代理
+
+只有在浏览器最终访问地址确实为 HTTP 时，才开启此模式。以下示例中 `10.0.0.12` 是管理台服务器内网 IP，`10.0.0.11` 是 Nginx 连接管理台时的**实际源 IP**。在管理台服务器的 `config.yaml` 中设置：
+
+```yaml
+server:
+  bind_address: "10.0.0.12"
+  port: 8085
+  public_base_url: "http://admin.example.com"
+  trusted_proxy_cidrs:
+    - "10.0.0.11/32"
+security:
+  cookie_secure: false
+  allow_insecure_http: true
+```
+
+在 Nginx 服务器配置反向代理；其余 `config.yaml` 字段仍按示例文件填写：
+
+```nginx
+server {
+    listen 80;
+    server_name admin.example.com;
+
+    location / {
+        proxy_pass http://10.0.0.12:8085;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+此模式只接受 `trusted_proxy_cidrs` 中的直接连接来源；每台远端代理都要单独列出 `/32`（IPv6 为 `/128`），并用防火墙将 8085 端口限制为仅代理服务器可达。HTTP 会明文传输登录密码和会话 Cookie，因此只应在受控网络内使用。使用包含此配置项的二进制，运行 `./hydra-admin check --config ./config.yaml` 验证。
 
 ## Linux systemd 后台运行
 

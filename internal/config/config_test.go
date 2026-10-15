@@ -115,6 +115,60 @@ func TestProductionURLAndCookie(t *testing.T) {
 	}
 }
 
+func TestInsecureHTTPProxyRequiresExplicitTrustedHost(t *testing.T) {
+	proxyConfig := strings.NewReplacer(
+		`bind_address: "127.0.0.1"`, `bind_address: "10.0.0.12"`,
+		`public_base_url: "http://127.0.0.1:8085"`, `public_base_url: "http://admin.example.test"`,
+		`"127.0.0.1/32"`, `"10.0.0.11/32"`,
+		"  cookie_secure: false", "  cookie_secure: false\n  allow_insecure_http: true",
+	).Replace(validYAML)
+	if cfg, err := loadText(t, proxyConfig); err != nil || !cfg.Security.AllowInsecureHTTP || !cfg.HTTPProxyOnly() {
+		t.Fatalf("trusted HTTP proxy configuration rejected: %v", err)
+	}
+	for _, tc := range []struct{ name, body string }{
+		{"missing opt-in", strings.Replace(proxyConfig, "  allow_insecure_http: true\n", "", 1)},
+		{"missing proxy", strings.Replace(proxyConfig, `"10.0.0.11/32"`, `"127.0.0.1/32"`, 1)},
+		{"broad proxy range", strings.Replace(proxyConfig, `"10.0.0.11/32"`, `"10.0.0.0/24"`, 1)},
+		{"secure cookie over HTTP", strings.Replace(proxyConfig, "cookie_secure: false", "cookie_secure: true", 1)},
+		{"loopback bind", strings.Replace(proxyConfig, `bind_address: "10.0.0.12"`, `bind_address: "127.0.0.1"`, 1)},
+		{"HTTPS with HTTP opt-in", strings.Replace(proxyConfig, `public_base_url: "http://admin.example.test"`, `public_base_url: "https://admin.example.test"`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := loadText(t, tc.body); err == nil {
+				t.Fatal("unsafe HTTP proxy configuration accepted")
+			}
+		})
+	}
+}
+
+func TestInsecureHTTPDirectRequiresMatchingPrivateAddress(t *testing.T) {
+	directConfig := strings.NewReplacer(
+		`bind_address: "127.0.0.1"`, `bind_address: "10.0.0.12"`,
+		`public_base_url: "http://127.0.0.1:8085"`, `public_base_url: "http://10.0.0.12:8085"`,
+		"  cookie_secure: false", "  cookie_secure: false\n  allow_insecure_http: true",
+	).Replace(validYAML)
+	if cfg, err := loadText(t, directConfig); err != nil || !cfg.Security.AllowInsecureHTTP || cfg.HTTPProxyOnly() {
+		t.Fatalf("private HTTP direct configuration rejected: %v", err)
+	}
+	for _, tc := range []struct{ name, body string }{
+		{"missing opt-in", strings.Replace(directConfig, "  allow_insecure_http: true\n", "", 1)},
+		{"public IP", strings.ReplaceAll(directConfig, "10.0.0.12", "203.0.113.12")},
+		{"different private IP", strings.Replace(directConfig, `public_base_url: "http://10.0.0.12:8085"`, `public_base_url: "http://10.0.0.13:8085"`, 1)},
+		{"different port", strings.Replace(directConfig, `public_base_url: "http://10.0.0.12:8085"`, `public_base_url: "http://10.0.0.12:8086"`, 1)},
+		{"secure cookie over HTTP", strings.Replace(directConfig, "cookie_secure: false", "cookie_secure: true", 1)},
+		{"remote trusted proxy", strings.Replace(directConfig, `"127.0.0.1/32"`, `"10.0.0.11/32"`, 1)},
+		{"wildcard bind", strings.Replace(directConfig, `bind_address: "10.0.0.12"`, `bind_address: "0.0.0.0"`, 1)},
+		{"domain instead of IP", strings.Replace(directConfig, `public_base_url: "http://10.0.0.12:8085"`, `public_base_url: "http://admin.example.test:8085"`, 1)},
+		{"old mode flag", strings.Replace(directConfig, "  allow_insecure_http: true", "  allow_insecure_http_direct: true", 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := loadText(t, tc.body); err == nil {
+				t.Fatal("unsafe HTTP direct configuration accepted")
+			}
+		})
+	}
+}
+
 func TestNamedHydraReplicas(t *testing.T) {
 	const single = `  admin_base_url: "http://127.0.0.1:4445"`
 	multiple := `  admin_replicas:
