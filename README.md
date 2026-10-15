@@ -156,9 +156,17 @@ if ! id hydra-admin >/dev/null 2>&1; then
   sudo useradd --system --gid hydra-admin --no-create-home --home-dir /opt/hydra-admin --shell /usr/sbin/nologin hydra-admin
 fi
 sudo install -d -m 0755 -o root -g root /opt/hydra-admin
-sudo install -m 0755 -o root -g root ./hydra-admin /opt/hydra-admin/hydra-admin
-sudo install -m 0600 -o hydra-admin -g hydra-admin ./config.yaml /opt/hydra-admin/config.yaml
-sudo cp -R ./LICENSE ./SUPPORTED_HYDRA_VERSIONS.md ./THIRD_PARTY_NOTICES.md ./licenses /opt/hydra-admin/
+if [ ./hydra-admin -ef /opt/hydra-admin/hydra-admin ]; then
+  # 发布包已直接解压到 /opt/hydra-admin，无须复制文件到自身。
+  sudo chown root:root ./hydra-admin
+  sudo chmod 0755 ./hydra-admin
+  sudo chown hydra-admin:hydra-admin ./config.yaml
+  sudo chmod 0600 ./config.yaml
+else
+  sudo install -m 0755 -o root -g root ./hydra-admin /opt/hydra-admin/hydra-admin
+  sudo install -m 0600 -o hydra-admin -g hydra-admin ./config.yaml /opt/hydra-admin/config.yaml
+  sudo cp -R ./LICENSE ./SUPPORTED_HYDRA_VERSIONS.md ./THIRD_PARTY_NOTICES.md ./licenses /opt/hydra-admin/
+fi
 sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/logs
 sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml'
 ```
@@ -198,10 +206,10 @@ sudo systemd-analyze verify /etc/systemd/system/hydra-admin.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now hydra-admin
 sudo systemctl status hydra-admin --no-pager
-curl -f http://127.0.0.1:8085/healthz
+curl -f http://127.0.0.1:8085/healthz  # bind_address 为内网 IP 时，改用该 IP
 ```
 
-用 `sudo journalctl -u hydra-admin -n 100 --no-pager` 查看启动错误；应用日志和审计记录写入 `/opt/hydra-admin/logs/`。修改配置或更换二进制后运行 `sudo systemctl restart hydra-admin`。此示例只监听本机回环地址；如果要让其他设备访问，请通过 HTTPS 反向代理暴露管理台，并保持 Hydra Admin API 不对公网开放。
+用 `sudo journalctl -u hydra-admin -n 100 --no-pager` 查看启动错误；应用日志和审计记录写入 `/opt/hydra-admin/logs/`。修改配置或更换二进制后运行 `sudo systemctl restart hydra-admin`。监听地址与浏览器入口按上面的访问方式配置；Hydra Admin API 应保持在受限网络内。
 
 ## 从源码构建（开发）
 
