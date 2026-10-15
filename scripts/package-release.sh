@@ -25,6 +25,7 @@ for target in "${release_targets[@]}"; do
   chmod 0600 "$release_dir/config.yaml"
   cp LICENSE SUPPORTED_HYDRA_VERSIONS.md THIRD_PARTY_NOTICES.md "$release_dir/"
   cp -R "$license_dir" "$release_dir/licenses"
+  chmod 0755 "$release_dir/licenses"
   {
     printf '# Hydra Admin Console — %s release\n\n' "$target"
     cat <<'EOF'
@@ -88,7 +89,24 @@ with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as arch
 PY
   else
     archive="$root_dir/dist/$release_name.tar.gz"
-    COPYFILE_DISABLE=1 LC_ALL=C tar --no-xattrs -C "$root_dir/dist" -czf "$archive" "$release_name"
+    python3 - "$release_dir" "$archive" <<'PY'
+import pathlib
+import sys
+import tarfile
+
+root = pathlib.Path(sys.argv[1])
+with tarfile.open(sys.argv[2], 'w:gz', format=tarfile.PAX_FORMAT) as archive:
+    for path in (root, *sorted(root.rglob('*'))):
+        info = archive.gettarinfo(path, arcname=str(path.relative_to(root.parent)))
+        info.uid = info.gid = 0
+        info.uname = info.gname = 'root'
+        info.pax_headers = {}
+        if info.isfile():
+            with path.open('rb') as source:
+                archive.addfile(info, source)
+        else:
+            archive.addfile(info)
+PY
   fi
   python3 - "$archive" <<'PY'
 import hashlib
