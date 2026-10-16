@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // Lightning CSS rewrites max-width queries to range syntax that older mobile browsers ignore.
+    cssMinify: false,
+  },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     environment: 'jsdom',
