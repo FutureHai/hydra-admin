@@ -383,9 +383,7 @@ make release VERSION=0.1.0
 | ARM64 包 | 构建并打包；目标设备运行仍需验收。 |
 | 浏览器 | 自动化覆盖 Chromium；尚未声明其他浏览器及最低版本。 |
 
-本仓库保留构建运行必需的固定 OpenAPI、来源与许可证材料，以及 [支持版本说明](SUPPORTED_HYDRA_VERSIONS.md)。
-
-详细适配审阅记录存放在独立的 [hydra-admin-doc](https://github.com/FutureHai/hydra-admin-doc) 仓库；该仓库目前为私有，公开前仅授权用户可访问。公开可核对的固定规范来源、摘要和许可证信息见本仓库的 [specs/v26.2.0/SOURCE.md](specs/v26.2.0/SOURCE.md)。
+本仓库保留构建运行必需的固定 OpenAPI、来源与许可证材料，以及 [支持版本说明](SUPPORTED_HYDRA_VERSIONS.md)。固定规范的来源、摘要和许可证信息见本仓库的 [SOURCE.md](specs/v26.2.0/SOURCE.md)。
 
 ## 排错
 
