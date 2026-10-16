@@ -40,6 +40,7 @@ before starting the service.
    review `SUPPORTED_HYDRA_VERSIONS.md`.
 3. Run `hydra-admin hash-password` in an interactive terminal, then set
    `auth.password_hash`, the console URL and Hydra URLs in `config.yaml`.
+   It defaults to Argon2id; use `hash-password --algorithm bcrypt` if needed.
 4. Restrict access to `config.yaml` and choose private writable log and audit
    paths. On Unix, run `chmod 600 config.yaml`.
 5. Run `hydra-admin check --config config.yaml`, then
@@ -50,9 +51,12 @@ On Linux, `sha256sum -c SHA256SUMS` verifies the extracted files. On macOS,
 use `shasum -a 256 -c SHA256SUMS`. On Windows, use `Get-FileHash` in
 PowerShell and compare each result with `SHA256SUMS`.
 
-Keep the Hydra Admin API on a restricted network and expose this console only
-through a correctly configured HTTPS proxy. `check` performs read-only
-probes; complete target-environment acceptance before production writes.
+Keep the Hydra Admin API on a restricted network. Prefer a correctly configured
+HTTPS proxy for browser access; HTTP exposes passwords and session cookies in
+transit. `check` sends no write request to Hydra, but creates/checks local log
+and audit directories and temporary write
+probes; those paths must be writable. Complete target-environment acceptance
+before production writes.
 Linux systemd setup and release guidance are in the
 [public repository README](https://github.com/FutureHai/hydra-admin).
 
