@@ -40,7 +40,7 @@ type HTTPAdapter struct {
 // ConfigurePublicRevoke is explicit. Without it the Public endpoint cannot be
 // reached by business code, even if an Admin adapter exists.
 func (a *HTTPAdapter) ConfigurePublicRevoke(baseURL string) error {
-	public, err := NewHTTPAdapter(baseURL, a.client.Timeout)
+	public, err := newHTTPAdapter(baseURL, a.client.Timeout, true)
 	if err != nil {
 		return err
 	}
@@ -49,16 +49,21 @@ func (a *HTTPAdapter) ConfigurePublicRevoke(baseURL string) error {
 }
 
 func NewHTTPAdapter(baseURL string, timeout time.Duration) (*HTTPAdapter, error) {
+	return newHTTPAdapter(baseURL, timeout, false)
+}
+
+func newHTTPAdapter(baseURL string, timeout time.Duration, restrictPublicHTTP bool) (*HTTPAdapter, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil || base == nil || (base.Scheme != "http" && base.Scheme != "https") || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" || timeout <= 0 {
 		return nil, errors.New("invalid Hydra probe configuration")
 	}
-	if base.Scheme == "http" {
+	if restrictPublicHTTP && base.Scheme == "http" {
 		ip := net.ParseIP(base.Hostname())
 		if ip == nil || !ip.IsLoopback() {
-			return nil, errors.New("plaintext Hydra probe requires a loopback IP literal")
+			return nil, errors.New("plaintext Hydra Public URL requires a loopback IP literal")
 		}
 	}
+	expectedIP := net.ParseIP(base.Hostname())
 	transport := &http.Transport{
 		Proxy:                 nil,
 		TLSHandshakeTimeout:   min(timeout, 5*time.Second),
@@ -70,11 +75,11 @@ func NewHTTPAdapter(baseURL string, timeout time.Duration) (*HTTPAdapter, error)
 		if err != nil {
 			return nil, err
 		}
-		if base.Scheme == "http" {
+		if restrictPublicHTTP && base.Scheme == "http" {
 			tcp, ok := conn.RemoteAddr().(*net.TCPAddr)
-			if !ok || !tcp.IP.IsLoopback() {
+			if !ok || !tcp.IP.Equal(expectedIP) {
 				conn.Close()
-				return nil, errors.New("Hydra connection left loopback")
+				return nil, errors.New("Hydra connection reached an unexpected address")
 			}
 		}
 		return conn, nil

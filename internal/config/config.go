@@ -278,7 +278,7 @@ func (c *Config) Validate(configDir string) error {
 			return errors.New("hydra.admin_replicas has an invalid or duplicate name")
 		}
 		seenNames[replica.Name] = true
-		endpoint, err := validHydraURL(replica.AdminBaseURL)
+		endpoint, err := validURL(replica.AdminBaseURL)
 		if err != nil {
 			return fmt.Errorf("hydra Admin URL for %s: %w", replica.Name, err)
 		}
@@ -289,7 +289,7 @@ func (c *Config) Validate(configDir string) error {
 		seenURLs[canonical] = true
 	}
 	if c.Hydra.PublicAPIBaseURL != "" {
-		if _, err := validHydraURL(c.Hydra.PublicAPIBaseURL); err != nil {
+		if _, err := validHydraPublicURL(c.Hydra.PublicAPIBaseURL); err != nil {
 			return fmt.Errorf("hydra.public_api_base_url: %w", err)
 		}
 	} else if c.Hydra.TokenRevokeEnabled {
@@ -375,13 +375,13 @@ func (c *Config) HTTPProxyOnly() bool {
 		!literalLoopback(public.Hostname()) && !privateHTTPDirect(bind, public, c.Server.Port)
 }
 
-func validHydraURL(raw string) (*url.URL, error) {
+func validHydraPublicURL(raw string) (*url.URL, error) {
 	u, err := validURL(raw)
 	if err != nil {
 		return nil, err
 	}
 	if u.Scheme == "http" && !literalLoopback(u.Hostname()) {
-		return nil, errors.New("HTTP Hydra URL requires a loopback IP literal; cross-host access requires HTTPS")
+		return nil, errors.New("HTTP Hydra Public URL requires a loopback IP literal; cross-host access requires HTTPS")
 	}
 	return u, nil
 }

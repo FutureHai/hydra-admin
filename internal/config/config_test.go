@@ -84,7 +84,6 @@ func TestStrictYAMLAndValidation(t *testing.T) {
 		{"invalid CIDR", `"127.0.0.1/32"`, `"127.0.0.1/99"`},
 		{"relative escape", `path: "./logs/audit.jsonl"`, `path: "../audit.jsonl"`},
 		{"cookie conflict", "cookie_secure: false", "cookie_secure: true"},
-		{"cross-host HTTP Hydra", `admin_base_url: "http://127.0.0.1:4445"`, `admin_base_url: "http://192.0.2.1:4445"`},
 		{"userinfo Hydra", `admin_base_url: "http://127.0.0.1:4445"`, `admin_base_url: "https://user:pass@example.test"`},
 		{"fragment Hydra", `admin_base_url: "http://127.0.0.1:4445"`, `admin_base_url: "https://example.test/#part"`},
 		{"bad scheme", `admin_base_url: "http://127.0.0.1:4445"`, `admin_base_url: "ftp://example.test"`},
@@ -175,7 +174,7 @@ func TestNamedHydraReplicas(t *testing.T) {
     - name: hydra-a
       admin_base_url: "http://127.0.0.1:4445"
     - name: hydra-b
-      admin_base_url: "https://hydra-b.internal.example:4445"`
+      admin_base_url: "http://10.0.0.12:4445"`
 	cfg, err := loadText(t, strings.Replace(validYAML, single, multiple, 1))
 	if err != nil || len(cfg.ConfiguredReplicas()) != 2 || cfg.ConfiguredReplicas()[1].Name != "hydra-b" {
 		t.Fatalf("valid replicas rejected: %v", err)
@@ -183,12 +182,35 @@ func TestNamedHydraReplicas(t *testing.T) {
 	for _, text := range []string{
 		strings.Replace(validYAML, single, single+"\n"+multiple, 1),
 		strings.Replace(validYAML, single, strings.Replace(multiple, "hydra-b", "hydra-a", 1), 1),
-		strings.Replace(validYAML, single, strings.Replace(multiple, "https://hydra-b.internal.example:4445", "http://127.0.0.1:4445", 1), 1),
-		strings.Replace(validYAML, single, strings.Replace(multiple, "https://hydra-b.internal.example:4445", "http://192.0.2.2:4445", 1), 1),
+		strings.Replace(validYAML, single, strings.Replace(multiple, "http://10.0.0.12:4445", "http://127.0.0.1:4445", 1), 1),
 		strings.Replace(validYAML, single, strings.Replace(multiple, "name: hydra-b", "name: bad/name", 1), 1),
 	} {
 		if _, err := loadText(t, text); err == nil {
 			t.Fatal("invalid replica configuration accepted")
+		}
+	}
+}
+
+func TestHydraAdminHTTPAddressesAndPublicBoundary(t *testing.T) {
+	const admin = `admin_base_url: "http://127.0.0.1:4445"`
+	for _, address := range []string{
+		"http://10.0.0.12:4445",
+		"http://203.0.113.12:4445",
+		"http://hydra.internal:4445",
+		"https://hydra.example.test:4445",
+	} {
+		body := strings.Replace(validYAML, admin, `admin_base_url: "`+address+`"`, 1)
+		if _, err := loadText(t, body); err != nil {
+			t.Fatalf("Admin address %q rejected: %v", address, err)
+		}
+	}
+	for _, address := range []string{
+		"http://10.0.0.12:4444",
+		"http://hydra.internal:4444",
+	} {
+		body := strings.Replace(validYAML, `public_api_base_url: ""`, `public_api_base_url: "`+address+`"`, 1)
+		if _, err := loadText(t, body); err == nil {
+			t.Fatalf("plaintext Public address %q accepted", address)
 		}
 	}
 }

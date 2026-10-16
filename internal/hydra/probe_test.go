@@ -97,8 +97,39 @@ func TestDeniedAndTransportRestrictions(t *testing.T) {
 	if report.Status != string(ProbeDenied) || !strings.Contains(report.Diagnostic, "额外认证") || strings.Contains(string(data), "secret upstream body") {
 		t.Fatalf("denied report: %s", data)
 	}
-	if _, err := NewHTTPAdapter("http://example.com:4445", time.Second); err == nil {
-		t.Fatal("cross-host plaintext accepted")
+	for _, address := range []string{
+		"http://10.0.0.12:4445",
+		"http://203.0.113.12:4445",
+		"http://hydra.internal:4445",
+		"https://hydra.example.test:4445",
+	} {
+		if _, err := NewHTTPAdapter(address, time.Second); err != nil {
+			t.Fatalf("Admin URL %q rejected: %v", address, err)
+		}
+	}
+	for _, address := range []string{"http://10.0.0.12:4444", "http://hydra.internal:4444"} {
+		if err := adapter.ConfigurePublicRevoke(address); err == nil {
+			t.Fatalf("plaintext Public URL %q accepted", address)
+		}
+	}
+}
+
+func TestHTTPAdminHostnameIsReachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/version" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"version":"v26.2.0"}`))
+	}))
+	defer server.Close()
+	adapter, err := NewHTTPAdapter(strings.Replace(server.URL, "127.0.0.1", "localhost", 1), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, result := adapter.Version(context.Background())
+	if result != ProbeOK || version != "v26.2.0" {
+		t.Fatalf("hostname Admin probe failed: %s %s", result, version)
 	}
 }
 

@@ -11,14 +11,15 @@ server:
   idle_timeout: 60s
 
 hydra:
-  # 常见单机示例；Admin API 必须通过受限网络供本应用访问，不支持额外网关认证。
+  # 常见单机示例；建议通过受控网络访问 Admin API，本应用不支持额外网关认证。
+  # Admin 副本可配置可达的 HTTP/HTTPS 地址，支持 IP 或域名；HTTP 为明文传输。
   # 多个副本共用同一 Hydra 数据库、版本、issuer 与密钥；名称会显示在状态页。
   # 单副本旧配置 admin_base_url 仍可用，但不能与 admin_replicas 同时填写。
   admin_replicas:
     - name: "hydra-a"
       admin_base_url: "http://127.0.0.1:4445"
     # - name: "hydra-b"
-    #   admin_base_url: "https://hydra-b.internal.example:4445"
+    #   admin_base_url: "http://hydra-b.internal.example:4445"
   # 仅在启用 Token revoke 时填写；它可能与 issuer 相同，不能猜测。
   public_api_base_url: ""
   timeout: 10s

@@ -68,7 +68,7 @@ Get-Content SHA256SUMS | ForEach-Object {
 
 ### 配置并启动
 
-在**解压后的包目录**先生成密码哈希，再编辑 `config.yaml`。至少设置 `server.public_base_url`（浏览器访问管理台的根地址）、`hydra.admin_replicas` 中的 Admin 地址和 `auth.password_hash`。`hash-password` 会在交互终端静默读取两次密码；把输出的哈希填入配置，示例哈希不能登录。程序根据浏览器地址、监听 IP 和可信代理自动判断访问方式；非回环 HTTP 只需显式设置 `security.allow_insecure_http: true`。Hydra Admin API 需从运行管理台的机器可达，且应限制在可信网络。
+在**解压后的包目录**先生成密码哈希，再编辑 `config.yaml`。至少设置 `server.public_base_url`（浏览器访问管理台的根地址）、`hydra.admin_replicas` 中的 Admin 地址和 `auth.password_hash`。`hash-password` 会在交互终端静默读取两次密码；把输出的哈希填入配置，示例哈希不能登录。程序根据浏览器地址、监听 IP 和可信代理自动判断访问方式；非回环 HTTP 只需显式设置 `security.allow_insecure_http: true`。Hydra Admin 副本可配置管理台机器能够直接访问的 HTTP/HTTPS 地址，支持 IP 或域名；这里的 HTTP 不需要设置 `security.allow_insecure_http`，该开关只控制浏览器访问管理台。`hydra.public_api_base_url` 若用于 revoke，跨主机访问仍需 HTTPS。
 
 ```bash
 chmod 600 config.yaml
@@ -225,7 +225,7 @@ cp configs/config.example.yaml config.yaml
 ./dist/hydra-admin serve --config config.yaml
 ```
 
-示例配置中的密码哈希不可用于登录。将 Hydra Admin API 限制在可信网络；跨主机连接需要有效的 HTTPS 证书。`check` 只执行配置校验和只读探测，不代表写操作已在目标环境验收。不要提交真实密码哈希、Token、Client Secret、生产地址或日志。
+示例配置中的密码哈希不可用于登录。建议将 Hydra Admin API 限制在可信网络；跨主机 HTTP 为明文传输，可使用 HTTPS 保护链路。`check` 只执行配置校验和只读探测，不代表写操作已在目标环境验收。不要提交真实密码哈希、Token、Client Secret、生产地址或日志。
 
 前后端分开开发时，先启动 Go 服务，再在 `web/` 运行 `npm run dev`。Vite 默认使用 `127.0.0.1:5173` 并代理 API 到 `127.0.0.1:8085`；此时本机开发配置的 `server.public_base_url` 应为 `http://127.0.0.1:5173`，`server.bind_address` 为 `127.0.0.1`，`security.cookie_secure` 为 `false`。
 
