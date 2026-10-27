@@ -2,7 +2,7 @@ import axios from 'axios'
 import { api } from '../auth/api'
 
 export type ClientRead = { client_id: string; fields: Record<string, unknown> }
-export type WritableField = { name: string; kind: 'text' | 'array' | 'select'; required?: boolean; options?: string[]; help?: string }
+export type WritableField = { name: string; kind: 'text' | 'array' | 'select' | 'json'; required?: boolean; options?: string[]; help?: string }
 export type ResourceCatalog = { global_scopes?: string[]; audiences?: { audience: string; scopes: string[] }[] }
 export type Capabilities = Record<string, { enabled: boolean; reason?: string }>
 export type ClientListResponse = { items: ClientRead[]; page_size: number; next_page_token?: string; pagination_supported: boolean; capabilities: Capabilities; writable_schema: WritableField[]; resource_catalog?: ResourceCatalog }

@@ -1,7 +1,41 @@
-import { expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Form } from 'antd'
-import { ClientFieldSections, FieldList } from './ClientWritePages'
+import { MemoryRouter } from 'react-router-dom'
+import { ClientFieldSections, FieldList, SpecClientCreate } from './ClientWritePages'
+
+const { listClients, createClient } = vi.hoisted(() => ({ listClients: vi.fn(), createClient: vi.fn() }))
+vi.mock('./api', async importOriginal => ({
+  ...(await importOriginal<typeof import('./api')>()),
+  listClients,
+  createClient,
+}))
+
+beforeEach(() => { listClients.mockReset(); createClient.mockReset() })
+
+it('validates and submits metadata as a JSON object when creating a Client', async () => {
+  listClients.mockResolvedValue({ items: [], capabilities: { client_create: { enabled: true } }, writable_schema: [
+    { name: 'client_id', kind: 'text', required: true },
+    { name: 'metadata', kind: 'json' },
+  ] })
+  createClient.mockResolvedValue({ client: { client_id: 'metadata-test', fields: {} } })
+  render(<MemoryRouter><SpecClientCreate /></MemoryRouter>)
+  const metadata = await screen.findByRole('textbox', { name: 'Metadata（JSON）' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Client ID' }), { target: { value: 'metadata-test' } })
+  fireEvent.change(metadata, { target: { value: '{"incomplete":' } })
+  fireEvent.click(screen.getByRole('button', { name: '检查创建摘要' }))
+  expect(await screen.findByText('请输入有效 JSON')).toBeInTheDocument()
+  expect(screen.queryByRole('dialog', { name: '确认创建 Client' })).not.toBeInTheDocument()
+
+  fireEvent.change(metadata, { target: { value: '{"department":"billing","priority":2}' } })
+  fireEvent.click(screen.getByRole('button', { name: '检查创建摘要' }))
+  const dialog = await screen.findByRole('dialog', { name: '确认创建 Client' })
+  expect(within(dialog).getByText(/"department": "billing"/)).toBeInTheDocument()
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认创建' }))
+  await waitFor(() => expect(createClient).toHaveBeenCalledWith({
+    client_id: 'metadata-test', metadata: { department: 'billing', priority: 2 },
+  }))
+})
 
 it('shows adapter-provided grant and response type choices on the create form', async () => {
   render(<Form><FieldList create schema={[

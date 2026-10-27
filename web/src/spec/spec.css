@@ -139,6 +139,9 @@ html, body, #root { min-height: 100%; margin: 0; }
 .spec-client-form .ant-form-item-label { padding-bottom: 4px; }
 .spec-client-form .ant-form-item-label > label { height: auto; font-size: 13px; font-weight: 600; }
 .spec-client-form .ant-form-item-extra { margin-top: 4px; color: var(--color-text-secondary, #6b7280); font-size: 12px; line-height: 1.45; }
+.spec-client-form .spec-json-field { grid-column: 1 / -1; }
+.spec-json-input, .spec-summary-json { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+.spec-summary-json { max-height: 220px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .spec-resource-access { margin-top: 18px; padding-top: 16px; border-top: 1px solid #edf0f2; }
 .spec-resource-intro { margin: 0 0 12px; color: var(--color-text-secondary, #6b7280); font-size: 12px; line-height: 1.5; }
 .spec-resource-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

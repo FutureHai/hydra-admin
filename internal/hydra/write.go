@@ -34,7 +34,8 @@ type WritableField struct {
 }
 
 // This is the reviewed, deliberately narrow subset of oAuth2Client in the
-// pinned v26.2.0 schema. No arbitrary JSON, secret, JWK, or ID update path.
+// pinned v26.2.0 schema. Only metadata accepts arbitrary JSON; there is no
+// arbitrary top-level field, secret, JWK, or ID update path.
 var WritableSchema = []WritableField{
 	{Name: "client_id", Kind: "text", Required: true},
 	{Name: "client_name", Kind: "text"},
@@ -53,10 +54,11 @@ var WritableSchema = []WritableField{
 	{Name: "logo_uri", Kind: "text"},
 	{Name: "policy_uri", Kind: "text"},
 	{Name: "tos_uri", Kind: "text"},
+	{Name: "metadata", Kind: "json", Help: "可选的业务数据，填写合法 JSON（建议使用对象）；不要存放密码、Token 或 Secret。"},
 }
 
 func createOnlyField(name string) bool {
-	return name == "client_id" || name == "access_token_strategy"
+	return name == "client_id" || name == "access_token_strategy" || name == "metadata"
 }
 
 func WritableNames(create bool) []string {
@@ -81,7 +83,7 @@ func ValidateFields(fields map[string]json.RawMessage, create bool) *ReadError {
 	}
 	for name, raw := range fields {
 		f, ok := allowed[name]
-		if !ok || len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		if !ok || len(raw) == 0 || (f.Kind != "json" && bytes.Equal(bytes.TrimSpace(raw), []byte("null"))) {
 			return readFailure(422, "validation_failed")
 		}
 		switch f.Kind {
@@ -105,6 +107,10 @@ func ValidateFields(fields map[string]json.RawMessage, create bool) *ReadError {
 				if s == "" || len(s) > 2048 || strings.ContainsAny(s, "\x00\r\n") || len(f.Options) > 0 && !contains(f.Options, s) {
 					return readFailure(422, "validation_failed")
 				}
+			}
+		case "json":
+			if !json.Valid(raw) {
+				return readFailure(422, "validation_failed")
 			}
 		default:
 			return readFailure(422, "validation_failed")

@@ -14,9 +14,15 @@ const fieldLabels: Record<string, string> = {
   redirect_uris: 'Redirect URIs', post_logout_redirect_uris: '登出回调 URIs',
   allowed_cors_origins: 'CORS origins', owner: 'Owner', contacts: 'Contacts',
   client_uri: 'Client URI', logo_uri: 'Logo URI', policy_uri: 'Policy URI', tos_uri: 'Terms URI',
+  metadata: 'Metadata（JSON）',
 }
 
 function fieldLabel(name: string) { return fieldLabels[name] ?? name.replaceAll('_', ' ') }
+
+export function parseMetadataInput(value: unknown): unknown {
+  if (typeof value !== 'string') throw new Error('请输入有效 JSON')
+  return JSON.parse(value) as unknown
+}
 
 type FieldControlProps = {
   field: WritableField
@@ -29,11 +35,15 @@ export function FieldControl({ field, id, value, onChange }: FieldControlProps) 
   if (field.kind === 'select') return <Select id={id} value={value as string | undefined} onChange={onChange} allowClear={!field.required} placeholder={field.name === 'access_token_strategy' ? '沿用实例默认策略' : undefined} options={field.options?.map(item => ({ label: item, value: item }))} />
   if (field.name === 'scope') return <Select id={id} value={value as string[] | undefined} onChange={onChange} mode="tags" tokenSeparators={[' ', ',', '\n']} placeholder="输入 Scope 后按 Enter 添加" />
   if (field.kind === 'array') return <Select id={id} value={value as string[] | undefined} onChange={onChange} mode={field.options?.length ? 'multiple' : 'tags'} tokenSeparators={[',', '\n']} options={field.options?.map(item => ({ label: item, value: item }))} placeholder="输入后按 Enter 添加" />
+  if (field.kind === 'json') return <Input.TextArea id={id} value={value as string | undefined} onChange={onChange} rows={5} placeholder={'{"department":"example"}'} spellCheck={false} className="spec-json-input" />
   return <Input id={id} value={value as string | undefined} onChange={onChange} autoComplete="off" className={field.name === 'client_id' ? 'spec-mono-input' : undefined} />
 }
 
 export function FieldList({ schema, create = false }: { schema: WritableField[]; create?: boolean }) {
-  return <div className="spec-form-grid">{schema.map(field => <Form.Item key={field.name} name={field.name} label={fieldLabel(field.name)} extra={field.help} rules={create && field.required ? [{ required: true, message: `请填写 ${field.name}` }] : undefined}>
+  return <div className="spec-form-grid">{schema.map(field => <Form.Item key={field.name} name={field.name} label={fieldLabel(field.name)} extra={field.help} className={field.kind === 'json' ? 'spec-json-field' : undefined} rules={field.kind === 'json' ? [{ validator: async (_, value: unknown) => {
+    if (value === undefined || typeof value === 'string' && !value.trim()) return
+    try { parseMetadataInput(value) } catch { throw new Error('请输入有效 JSON') }
+  } }] : create && field.required ? [{ required: true, message: `请填写 ${field.name}` }] : undefined}>
     <FieldControl field={field} />
   </Form.Item>)}</div>
 }
@@ -42,7 +52,7 @@ const clientSections = [
   { key: 'identity', title: '基础信息', description: '用于识别和查找这个 Client', fields: ['client_id', 'client_name'] },
   { key: 'authorization', title: '授权与令牌', description: '选择授权流程和 Access Token 的生成方式', fields: ['grant_types', 'response_types', 'token_endpoint_auth_method', 'access_token_strategy', 'scope', 'audience'] },
   { key: 'redirects', title: '回调与来源', description: '配置允许的回调地址和浏览器来源', fields: ['redirect_uris', 'post_logout_redirect_uris', 'allowed_cors_origins'] },
-  { key: 'metadata', title: '其他信息', description: '可选的联系人和展示地址', fields: ['owner', 'contacts', 'client_uri', 'logo_uri', 'policy_uri', 'tos_uri'] },
+  { key: 'metadata', title: '其他信息', description: '可选的联系人、展示地址和业务数据', fields: ['owner', 'contacts', 'client_uri', 'logo_uri', 'policy_uri', 'tos_uri', 'metadata'] },
 ]
 
 export function ClientFieldSections({ schema, create = false, resourceCatalog }: { schema: WritableField[]; create?: boolean; resourceCatalog?: ResourceCatalog }) {
@@ -67,7 +77,7 @@ export function Summary({ fields, resourceCatalog, current }: { fields: Record<s
   const unmatched = showAccess ? unmatchedScopes(scopes, audiences ?? [], resourceCatalog!) : []
   const listedAudiences = new Set(resourceCatalog?.audiences?.map(resource => resource.audience) ?? [])
   const unknownAudiences = audiences?.filter(audience => !listedAudiences.has(audience)) ?? []
-  return <><div className="spec-detail-list">{Object.entries(fields).map(([name, value]) => <div className="spec-detail-row" key={name}><span>{name}</span><div className="spec-detail-value"><Typography.Text code>{Array.isArray(value) ? value.join(', ') : String(value)}</Typography.Text></div></div>)}</div>
+  return <><div className="spec-detail-list">{Object.entries(fields).map(([name, value]) => <div className="spec-detail-row" key={name}><span>{name}</span><div className="spec-detail-value">{name === 'metadata' ? <pre className="spec-summary-json">{JSON.stringify(value, null, 2)}</pre> : <Typography.Text code>{Array.isArray(value) ? value.join(', ') : String(value)}</Typography.Text>}</div></div>)}</div>
     {showAccess && <div className="spec-resource-preview"><strong>按资源查看最终配置</strong>
       {(resourceCatalog!.audiences ?? []).filter(resource => audiences?.includes(resource.audience)).map(resource => <p key={resource.audience}><Typography.Text code>{resource.audience}</Typography.Text>：{scopes.filter(scope => resource.scopes.includes(scope)).join('、') || '未选 Scope'}</p>)}
       {(resourceCatalog!.global_scopes ?? []).some(scope => scopes.includes(scope)) && <p>通用 Scope：{scopes.filter(scope => resourceCatalog!.global_scopes?.includes(scope)).join('、')}</p>}
@@ -102,7 +112,12 @@ export function SpecClientCreate() {
   function review(values: Record<string, unknown>) {
     const fields: Record<string, unknown> = {}
     for (const field of schema) {
-      const value = field.name === 'scope' ? scopeWireValue(values[field.name]) : values[field.name]
+      const raw = values[field.name]
+      if (field.name === 'metadata') {
+        if (typeof raw === 'string' && raw.trim()) fields.metadata = parseMetadataInput(raw)
+        continue
+      }
+      const value = field.name === 'scope' ? scopeWireValue(raw) : raw
       if (value !== undefined && value !== '' && (!Array.isArray(value) || value.length > 0)) fields[field.name] = value
     }
     setPreview(fields)

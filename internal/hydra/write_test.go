@@ -29,8 +29,11 @@ func TestWriteWhitelistPatchIsolationAndNoRetry(t *testing.T) {
 			if json.NewDecoder(r.Body).Decode(&body) != nil || len(body["client_secret"]) == 0 {
 				t.Error("create omitted generated secret")
 			}
+			if string(body["metadata"]) != `{"department":"billing","priority":2}` {
+				t.Errorf("create metadata was not forwarded as an object: %s", body["metadata"])
+			}
 			w.WriteHeader(201)
-			w.Write([]byte(`{"client_id":"test-id","client_name":"before","grant_types":["client_credentials"]}`))
+			w.Write([]byte(`{"client_id":"test-id","client_name":"before","grant_types":["client_credentials"],"metadata":{"department":"billing","priority":2,"api_key":"redact-me"}}`))
 		case r.Method == "PATCH" && r.URL.Path == "/admin/clients/test-id":
 			patchCalls++
 			var operations []map[string]json.RawMessage
@@ -52,9 +55,13 @@ func TestWriteWhitelistPatchIsolationAndNoRetry(t *testing.T) {
 	defer server.Close()
 	a, _ := NewHTTPAdapter(server.URL, time.Second)
 	ctx := context.Background()
-	fields := map[string]json.RawMessage{"client_id": mustJSON("test-id"), "grant_types": mustJSON([]string{"client_credentials"})}
-	if _, err := a.CreateClient(ctx, fields); err != nil || postCalls != 1 {
+	fields := map[string]json.RawMessage{"client_id": mustJSON("test-id"), "grant_types": mustJSON([]string{"client_credentials"}), "metadata": mustJSON(map[string]any{"department": "billing", "priority": 2})}
+	created, createErr := a.CreateClient(ctx, fields)
+	if createErr != nil || postCalls != 1 {
 		t.Fatal("create failed or retried")
+	}
+	if string(created.Client.Fields["metadata"]) != `{"api_key":"[redacted]","department":"billing","priority":2}` {
+		t.Fatalf("create response did not preserve and redact metadata: %s", created.Client.Fields["metadata"])
 	}
 	if _, err := a.CreateClient(ctx, map[string]json.RawMessage{"client_secret": mustJSON("forbidden")}); err == nil || postCalls != 1 {
 		t.Fatal("invalid create reached upstream")
@@ -145,5 +152,38 @@ func TestAccessTokenStrategyCreateOnly(t *testing.T) {
 	}
 	if err := ValidateFields(map[string]json.RawMessage{"access_token_strategy": mustJSON("jwt")}, false); err == nil || err.Status != http.StatusUnprocessableEntity {
 		t.Fatal("strategy update bypassed create-only gate")
+	}
+}
+
+func TestMetadataCreateOnlyAndJSONValidation(t *testing.T) {
+	var metadataField *WritableField
+	for i := range WritableSchema {
+		if WritableSchema[i].Name == "metadata" {
+			metadataField = &WritableSchema[i]
+			break
+		}
+	}
+	if metadataField == nil || metadataField.Kind != "json" || !contains(WritableNames(true), "metadata") || contains(WritableNames(false), "metadata") {
+		t.Fatal("metadata must be an explicit create-only JSON field")
+	}
+	fields := map[string]json.RawMessage{
+		"client_id":   mustJSON("metadata-test"),
+		"grant_types": mustJSON([]string{"client_credentials"}),
+		"metadata":    []byte(`{"department":"billing","priority":2,"labels":["a","b"]}`),
+	}
+	for _, valid := range []string{`{"department":"billing","priority":2,"labels":["a","b"]}`, `["business","labels"]`, `"business-data"`, `42`, `false`, `null`} {
+		fields["metadata"] = []byte(valid)
+		if err := ValidateFields(fields, true); err != nil {
+			t.Fatalf("valid metadata %s rejected: %s", valid, err.Code)
+		}
+	}
+	for _, invalid := range []string{`{invalid}`, `[1,`} {
+		fields["metadata"] = []byte(invalid)
+		if err := ValidateFields(fields, true); err == nil || err.Status != http.StatusUnprocessableEntity {
+			t.Fatalf("invalid metadata %s accepted", invalid)
+		}
+	}
+	if err := ValidateFields(map[string]json.RawMessage{"metadata": []byte(`{"department":"other"}`)}, false); err == nil || err.Status != http.StatusUnprocessableEntity {
+		t.Fatal("metadata update bypassed create-only gate")
 	}
 }
