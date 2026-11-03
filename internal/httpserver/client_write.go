@@ -30,6 +30,13 @@ func clientWriteAction(method, path string) (string, string) {
 		return "", ""
 	}
 	id := strings.TrimPrefix(path, prefix+"/")
+	if method == http.MethodPut && strings.HasSuffix(id, "/lifespans") {
+		id = strings.TrimSuffix(id, "/lifespans")
+		if id != "" && !strings.Contains(id, "/") {
+			return "client.lifespans_update", id
+		}
+		return "", ""
+	}
 	if id == "" || strings.Contains(id, "/") {
 		return "", ""
 	}
@@ -206,6 +213,46 @@ func (s *Server) patchClient(c *gin.Context) {
 		return
 	}
 	if !s.auditClient(c, "client.update", "success", id, fields) {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"client": client, "revision": client.Revision()})
+}
+
+func (s *Server) setClientLifespans(c *gin.Context) {
+	w, ok := s.clientWriter(c, "client_lifespans_update")
+	if !ok {
+		return
+	}
+	id := c.Param("clientId")
+	var input patchClientRequest
+	if err := decodeWrite(c, &input); err != nil {
+		if s.auditClient(c, "client.lifespans_update", "failure", id, nil) {
+			s.invalidBody(c, err)
+		}
+		return
+	}
+	fields := fieldNames(input.Changes)
+	if err := hydra.ValidateLifespanChanges(input.Changes); err != nil {
+		if s.auditClient(c, "client.lifespans_update", "failure", id, fields) {
+			s.fail(c, err.Status, err.Code, "Token 有效期字段校验失败")
+		}
+		return
+	}
+	lifespans, ok := w.(hydra.ClientLifespanAdapter)
+	if !ok {
+		if s.auditClient(c, "client.lifespans_update", "failure", id, fields) {
+			s.fail(c, http.StatusServiceUnavailable, "unavailable", "Client 有效期写入能力不可用")
+		}
+		return
+	}
+	client, err := lifespans.SetClientLifespans(c.Request.Context(), id, input.BaseRevision, input.Changes)
+	if err != nil {
+		if s.auditClient(c, "client.lifespans_update", "failure", id, fields) {
+			s.failHydraWrite(c, err)
+		}
+		return
+	}
+	if !s.auditClient(c, "client.lifespans_update", "success", id, fields) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"client": client, "revision": client.Revision()})

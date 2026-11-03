@@ -208,6 +208,14 @@ func (a *ClusterAdapter) PatchClient(ctx context.Context, id, baseline string, c
 	return adapter.PatchClient(ctx, id, baseline, changes)
 }
 
+func (a *ClusterAdapter) SetClientLifespans(ctx context.Context, id, baseline string, changes map[string]json.RawMessage) (ClientRead, *ReadError) {
+	adapter, err := a.choose(ctx, "client_lifespans_update")
+	if err != nil {
+		return ClientRead{}, err
+	}
+	return adapter.SetClientLifespans(ctx, id, baseline, changes)
+}
+
 func (a *ClusterAdapter) DeleteClient(ctx context.Context, id string) *ReadError {
 	adapter, err := a.choose(ctx, "client_delete")
 	if err != nil {

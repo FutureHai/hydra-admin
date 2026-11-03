@@ -37,6 +37,64 @@ it('validates and submits metadata as a JSON object when creating a Client', asy
   }))
 })
 
+it('submits optional lifespan and consent overrides with the correct JSON types', async () => {
+  listClients.mockResolvedValue({ items: [], capabilities: { client_create: { enabled: true } }, writable_schema: [
+    { name: 'client_id', kind: 'text', required: true },
+    { name: 'client_credentials_grant_access_token_lifespan', kind: 'duration' },
+    { name: 'skip_consent', kind: 'boolean' },
+  ] })
+  createClient.mockResolvedValue({ client: { client_id: 'advanced-test', fields: {} } })
+  render(<MemoryRouter><SpecClientCreate /></MemoryRouter>)
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Client ID' }), { target: { value: 'advanced-test' } })
+  fireEvent.click(screen.getByText('自定义 Token 有效期'))
+  const lifespan = screen.getByRole('textbox', { name: 'Client Credentials · Access Token 有效期' })
+  fireEvent.change(lifespan, { target: { value: '2d' } })
+  fireEvent.click(screen.getByRole('button', { name: '检查创建摘要' }))
+  expect(await screen.findByText('请输入正数有效期，例如 1h30m')).toBeInTheDocument()
+  expect(createClient).not.toHaveBeenCalled()
+  fireEvent.change(lifespan, { target: { value: '2h30m' } })
+  fireEvent.click(screen.getByText('高级授权与登出设置'))
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '跳过授权同意页' }))
+  fireEvent.click(await screen.findByTitle('开启'))
+  fireEvent.click(screen.getByRole('button', { name: '检查创建摘要' }))
+  const dialog = await screen.findByRole('dialog', { name: '确认创建 Client' })
+  expect(within(dialog).getByText(/此 Client 将跳过用户授权同意页/)).toBeInTheDocument()
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认创建' }))
+  await waitFor(() => expect(createClient).toHaveBeenCalledWith({
+    client_id: 'advanced-test', client_credentials_grant_access_token_lifespan: '2h30m', skip_consent: true,
+  }))
+})
+
+it('requires a logout URI when a channel requires session identification', async () => {
+  listClients.mockResolvedValue({ items: [], capabilities: { client_create: { enabled: true } }, writable_schema: [
+    { name: 'client_id', kind: 'text', required: true },
+    { name: 'backchannel_logout_uri', kind: 'text' },
+    { name: 'backchannel_logout_session_required', kind: 'boolean' },
+  ] })
+  render(<MemoryRouter><SpecClientCreate /></MemoryRouter>)
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Client ID' }), { target: { value: 'logout-test' } })
+  fireEvent.click(screen.getByText('高级授权与登出设置'))
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: '后通道需要会话标识' }))
+  fireEvent.click(await screen.findByTitle('开启'))
+  fireEvent.click(screen.getByRole('button', { name: '检查创建摘要' }))
+  expect(await screen.findByText('启用会话标识时需要填写对应的登出 URI')).toBeInTheDocument()
+  expect(screen.queryByRole('dialog', { name: '确认创建 Client' })).not.toBeInTheDocument()
+})
+
+it('shows lifespan fields only for the selected Grant types', async () => {
+  render(<Form initialValues={{ grant_types: ['authorization_code'] }}><ClientFieldSections create schema={[
+    { name: 'grant_types', kind: 'array', options: ['authorization_code', 'client_credentials'] },
+    { name: 'authorization_code_grant_access_token_lifespan', kind: 'duration' },
+    { name: 'client_credentials_grant_access_token_lifespan', kind: 'duration' },
+  ]} /></Form>)
+  fireEvent.click(screen.getByText('自定义 Token 有效期'))
+  expect(await screen.findByRole('textbox', { name: '授权码 · Access Token 有效期' })).toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: 'Client Credentials · Access Token 有效期' })).not.toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Grant types' }))
+  fireEvent.click(await screen.findByTitle('client_credentials'))
+  expect(await screen.findByRole('textbox', { name: 'Client Credentials · Access Token 有效期' })).toBeInTheDocument()
+})
+
 it('shows adapter-provided grant and response type choices on the create form', async () => {
   render(<Form><FieldList create schema={[
     { name: 'grant_types', kind: 'array', required: true, options: ['authorization_code', 'implicit'] },

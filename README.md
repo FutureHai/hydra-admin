@@ -21,7 +21,7 @@ Go + React 管理台，用于管理受支持的 ORY Hydra Client，并查看 Sco
 可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
 
 - Client 列表使用 Hydra 游标分页，每页 10 条；Scope / Audience 仅聚合当前可读取的前 100 个 Client，结果可能不完整。
-- 替换式 PUT 和 Secret 轮换关闭；Token 操作按版本探测及配置显示。
+- 可在 Client 详情编辑高级授权/登出设置，并独立调整 Token 有效期；替换整个 Client 的 PUT 和 Secret 轮换关闭。Token 操作按版本探测及配置显示。
 - Hydra 版本不匹配时，Client / Token 操作关闭；登录、状态、诊断和本地审计仍可用。详见 [支持版本与能力](SUPPORTED_HYDRA_VERSIONS.md)。
 
 ## 快速开始

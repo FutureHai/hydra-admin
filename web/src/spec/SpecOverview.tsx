@@ -17,6 +17,7 @@ const capabilityNames: { key: string; name: string }[] = [
   { key: 'client_detail', name: 'Client 详情' },
   { key: 'client_create', name: '创建 Client' },
   { key: 'client_update', name: '更新 Client' },
+  { key: 'client_lifespans_update', name: '更新 Token 有效期' },
   { key: 'client_delete', name: '删除 Client' },
   { key: 'secret_rotate', name: 'Secret 轮换' },
   { key: 'token_introspect', name: 'Token introspection' },

@@ -9,7 +9,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // ClientWriteAdapter is intentionally separate from read probes: check never
@@ -18,6 +21,12 @@ type ClientWriteAdapter interface {
 	CreateClient(context.Context, map[string]json.RawMessage) (CreateResult, *ReadError)
 	PatchClient(context.Context, string, string, map[string]json.RawMessage) (ClientRead, *ReadError)
 	DeleteClient(context.Context, string) *ReadError
+}
+
+// ClientLifespanAdapter uses Hydra's dedicated lifespan operation. Its PUT
+// replaces the lifespan set, so the adapter always sends the full known set.
+type ClientLifespanAdapter interface {
+	SetClientLifespans(context.Context, string, string, map[string]json.RawMessage) (ClientRead, *ReadError)
 }
 
 type CreateResult struct {
@@ -32,6 +41,29 @@ type WritableField struct {
 	Options  []string `json:"options,omitempty"`
 	Help     string   `json:"help,omitempty"`
 }
+
+var clientDurationPattern = regexp.MustCompile(`^([0-9]+(ns|us|ms|s|m|h))+$`)
+
+var clientLifespanFields = []string{
+	"authorization_code_grant_access_token_lifespan",
+	"authorization_code_grant_id_token_lifespan",
+	"authorization_code_grant_refresh_token_lifespan",
+	"client_credentials_grant_access_token_lifespan",
+	"device_authorization_grant_access_token_lifespan",
+	"device_authorization_grant_id_token_lifespan",
+	"device_authorization_grant_refresh_token_lifespan",
+	"implicit_grant_access_token_lifespan",
+	"implicit_grant_id_token_lifespan",
+	"refresh_token_grant_access_token_lifespan",
+	"refresh_token_grant_id_token_lifespan",
+	"refresh_token_grant_refresh_token_lifespan",
+}
+
+// The JWT bearer lifespan is not editable in this console, but must survive
+// a dedicated lifespan PUT when the existing Client already has one.
+var allClientLifespanFields = append(append([]string{}, clientLifespanFields...), "jwt_bearer_grant_access_token_lifespan")
+
+func WritableLifespanNames() []string { return append([]string{}, clientLifespanFields...) }
 
 // This is the reviewed, deliberately narrow subset of oAuth2Client in the
 // pinned v26.2.0 schema. Only metadata accepts arbitrary JSON; there is no
@@ -54,11 +86,29 @@ var WritableSchema = []WritableField{
 	{Name: "logo_uri", Kind: "text"},
 	{Name: "policy_uri", Kind: "text"},
 	{Name: "tos_uri", Kind: "text"},
-	{Name: "metadata", Kind: "json", Help: "可选的业务数据，填写合法 JSON（建议使用对象）；不要存放密码、Token 或 Secret。"},
+	{Name: "metadata", Kind: "json", Help: "填写合法 JSON；编辑时会整体替换 Metadata，请保留仍需要的键。不要存放密码、Token 或 Secret。"},
+	{Name: "skip_consent", Kind: "boolean", Help: "仅可信 Client 使用；开启后跳过用户授权同意页。留空使用 Hydra 默认值。"},
+	{Name: "skip_logout_consent", Kind: "boolean", Help: "开启后跳过登出同意页。留空使用 Hydra 默认值。"},
+	{Name: "frontchannel_logout_uri", Kind: "text", Help: "前通道登出回调地址；与“登出回调 URIs”用途不同。"},
+	{Name: "frontchannel_logout_session_required", Kind: "boolean", Help: "是否要求前通道登出带会话标识；开启时必须设置前通道登出 URI。"},
+	{Name: "backchannel_logout_uri", Kind: "text", Help: "后通道登出回调地址；Hydra 会向此地址发送登出通知。"},
+	{Name: "backchannel_logout_session_required", Kind: "boolean", Help: "是否要求后通道登出 Token 含会话标识；开启时必须设置后通道登出 URI。"},
+	{Name: "authorization_code_grant_access_token_lifespan", Kind: "duration"},
+	{Name: "authorization_code_grant_id_token_lifespan", Kind: "duration"},
+	{Name: "authorization_code_grant_refresh_token_lifespan", Kind: "duration"},
+	{Name: "client_credentials_grant_access_token_lifespan", Kind: "duration"},
+	{Name: "device_authorization_grant_access_token_lifespan", Kind: "duration"},
+	{Name: "device_authorization_grant_id_token_lifespan", Kind: "duration"},
+	{Name: "device_authorization_grant_refresh_token_lifespan", Kind: "duration"},
+	{Name: "implicit_grant_access_token_lifespan", Kind: "duration"},
+	{Name: "implicit_grant_id_token_lifespan", Kind: "duration"},
+	{Name: "refresh_token_grant_access_token_lifespan", Kind: "duration"},
+	{Name: "refresh_token_grant_id_token_lifespan", Kind: "duration"},
+	{Name: "refresh_token_grant_refresh_token_lifespan", Kind: "duration"},
 }
 
 func createOnlyField(name string) bool {
-	return name == "client_id" || name == "access_token_strategy" || name == "metadata"
+	return name == "client_id" || name == "access_token_strategy" || contains(clientLifespanFields, name)
 }
 
 func WritableNames(create bool) []string {
@@ -98,6 +148,18 @@ func ValidateFields(fields map[string]json.RawMessage, create bool) *ReadError {
 			if f.Kind == "select" && !contains(f.Options, s) {
 				return readFailure(422, "validation_failed")
 			}
+			if (name == "frontchannel_logout_uri" || name == "backchannel_logout_uri") && s != "" && !validClientLogoutURI(s) {
+				return readFailure(422, "validation_failed")
+			}
+		case "duration":
+			if !validClientDuration(raw) {
+				return readFailure(422, "validation_failed")
+			}
+		case "boolean":
+			var enabled bool
+			if json.Unmarshal(raw, &enabled) != nil {
+				return readFailure(422, "validation_failed")
+			}
 		case "array":
 			var v []string
 			if json.Unmarshal(raw, &v) != nil || len(v) > 64 || (f.Required && len(v) == 0) {
@@ -117,6 +179,9 @@ func ValidateFields(fields map[string]json.RawMessage, create bool) *ReadError {
 		}
 	}
 	if create {
+		if err := validateLogoutDependencies(fields, nil); err != nil {
+			return err
+		}
 		for _, f := range WritableSchema {
 			if f.Required {
 				if _, ok := fields[f.Name]; !ok {
@@ -126,6 +191,57 @@ func ValidateFields(fields map[string]json.RawMessage, create bool) *ReadError {
 		}
 	}
 	return nil
+}
+
+func validClientDuration(raw json.RawMessage) bool {
+	var value string
+	if json.Unmarshal(raw, &value) != nil || len(value) > 64 || !clientDurationPattern.MatchString(value) {
+		return false
+	}
+	duration, err := time.ParseDuration(value)
+	return err == nil && duration > 0
+}
+
+func validateLogoutDependencies(changes, current map[string]json.RawMessage) *ReadError {
+	for _, channel := range []string{"frontchannel", "backchannel"} {
+		requiredRaw := current[channel+"_logout_session_required"]
+		if changed, ok := changes[channel+"_logout_session_required"]; ok {
+			requiredRaw = changed
+		}
+		var required bool
+		_ = json.Unmarshal(requiredRaw, &required)
+		if !required {
+			continue
+		}
+		uriRaw := current[channel+"_logout_uri"]
+		if changed, ok := changes[channel+"_logout_uri"]; ok {
+			uriRaw = changed
+		}
+		var uri string
+		if json.Unmarshal(uriRaw, &uri) != nil || uri == "" {
+			return readFailure(422, "validation_failed")
+		}
+	}
+	return nil
+}
+
+// Changes may set a duration or null to restore the Hydra default. The JWT
+// bearer field is preserved by the adapter but not exposed as an edit choice.
+func ValidateLifespanChanges(changes map[string]json.RawMessage) *ReadError {
+	if len(changes) == 0 || len(changes) > len(clientLifespanFields) {
+		return readFailure(422, "validation_failed")
+	}
+	for name, raw := range changes {
+		if !contains(clientLifespanFields, name) || string(raw) != "null" && !validClientDuration(raw) {
+			return readFailure(422, "validation_failed")
+		}
+	}
+	return nil
+}
+
+func validClientLogoutURI(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Hostname() != "" && parsed.User == nil && parsed.Fragment == ""
 }
 
 func contains(xs []string, x string) bool {
@@ -199,6 +315,9 @@ func (a *HTTPAdapter) PatchClient(ctx context.Context, id, baseline string, chan
 	if current.Revision() != baseline {
 		return ClientRead{}, readFailure(409, "client_changed")
 	}
+	if err := validateLogoutDependencies(changes, current.Fields); err != nil {
+		return ClientRead{}, err
+	}
 	patch := make([]map[string]any, 0, len(changes))
 	for _, f := range WritableSchema {
 		if createOnlyField(f.Name) {
@@ -237,6 +356,80 @@ func (a *HTTPAdapter) PatchClient(ctx context.Context, id, baseline string, chan
 		return ClientRead{}, readFailure(502, "hydra_bad_response")
 	}
 	return updated, nil
+}
+
+// Hydra's lifespan PUT clears omitted lifespan fields. Read and resend every
+// existing lifespan, including the non-editable JWT bearer value, before
+// overlaying the caller's allowlisted changes. It never sends Client Secret.
+func (a *HTTPAdapter) SetClientLifespans(ctx context.Context, id, baseline string, changes map[string]json.RawMessage) (ClientRead, *ReadError) {
+	if !validClientID(id) || len(baseline) != 64 {
+		return ClientRead{}, readFailure(400, "bad_request")
+	}
+	if err := ValidateLifespanChanges(changes); err != nil {
+		return ClientRead{}, err
+	}
+	if !NewRegistry().LifespanWriteValid() {
+		return ClientRead{}, readFailure(409, "unsupported_version")
+	}
+	current, err := a.GetClient(ctx, id)
+	if err != nil {
+		return ClientRead{}, err
+	}
+	if current.Revision() != baseline {
+		return ClientRead{}, readFailure(409, "client_changed")
+	}
+	full := make(map[string]json.RawMessage, len(allClientLifespanFields))
+	for _, name := range allClientLifespanFields {
+		raw := current.Fields[name]
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		if !validClientDuration(raw) {
+			return ClientRead{}, readFailure(502, "hydra_bad_response")
+		}
+		full[name] = raw
+	}
+	changed := false
+	for name, raw := range changes {
+		old := full[name]
+		if string(raw) == "null" {
+			if len(old) > 0 {
+				changed = true
+			}
+			delete(full, name)
+			continue
+		}
+		if len(old) == 0 || !sameClientDuration(old, raw) {
+			changed = true
+		}
+		full[name] = raw
+	}
+	if !changed {
+		return ClientRead{}, readFailure(422, "no_changes")
+	}
+	encoded, _ := json.Marshal(full)
+	data, writeErr := a.writeLifespansJSON(ctx, id, encoded)
+	if writeErr != nil {
+		return ClientRead{}, writeErr
+	}
+	updated, decodeErr := decodeClient(data)
+	if decodeErr != nil {
+		return ClientRead{}, decodeErr
+	}
+	if updated.ClientID != id {
+		return ClientRead{}, readFailure(502, "hydra_bad_response")
+	}
+	return updated, nil
+}
+
+func sameClientDuration(a, b json.RawMessage) bool {
+	var first, second string
+	if json.Unmarshal(a, &first) != nil || json.Unmarshal(b, &second) != nil {
+		return false
+	}
+	one, errOne := time.ParseDuration(first)
+	two, errTwo := time.ParseDuration(second)
+	return errOne == nil && errTwo == nil && one == two
 }
 
 func (a *HTTPAdapter) DeleteClient(ctx context.Context, id string) *ReadError {

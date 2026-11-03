@@ -277,7 +277,24 @@ func (a *HTTPAdapter) writeJSON(ctx context.Context, method, id string, body []b
 		u.Path += "/" + id
 		u.RawPath = strings.TrimRight(a.base.EscapedPath(), "/") + "/admin/clients/" + url.PathEscape(id)
 	}
-	request, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
+	return a.doWriteJSON(ctx, method, u.String(), body, success)
+}
+
+func (a *HTTPAdapter) writeLifespansJSON(ctx context.Context, id string, body []byte) ([]byte, *ReadError) {
+	if !NewRegistry().LifespanWriteValid() {
+		return nil, readFailure(409, "unsupported_version")
+	}
+	if !validClientID(id) || len(body) == 0 {
+		return nil, readFailure(400, "bad_request")
+	}
+	u := *a.base
+	u.Path = strings.TrimRight(a.base.Path, "/") + "/admin/clients/" + id + "/lifespans"
+	u.RawPath = strings.TrimRight(a.base.EscapedPath(), "/") + "/admin/clients/" + url.PathEscape(id) + "/lifespans"
+	return a.doWriteJSON(ctx, http.MethodPut, u.String(), body, http.StatusOK)
+}
+
+func (a *HTTPAdapter) doWriteJSON(ctx context.Context, method, target string, body []byte, success int) ([]byte, *ReadError) {
+	request, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, readFailure(502, "hydra_bad_gateway")
 	}

@@ -59,7 +59,7 @@ func TestPinnedSpecAndVersionFixtures(t *testing.T) {
 				t.Fatalf("report=%+v listCalls=%d", report, listCalls)
 			}
 			for _, name := range businessNames {
-				want := tt.wantList && (name == "client_list" || name == "client_detail" || name == "client_create" || name == "client_update" || name == "client_delete" || name == "token_introspect" || name == "pagination" || name == "scopes" || name == "audiences")
+				want := tt.wantList && (name == "client_list" || name == "client_detail" || name == "client_create" || name == "client_update" || name == "client_lifespans_update" || name == "client_delete" || name == "token_introspect" || name == "pagination" || name == "scopes" || name == "audiences")
 				if report.BusinessAllowed(name) != want {
 					t.Fatalf("capability %s: got %v want %v", name, report.BusinessAllowed(name), want)
 				}

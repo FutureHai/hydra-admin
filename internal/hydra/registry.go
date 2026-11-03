@@ -123,6 +123,39 @@ func (r Registry) WriteValid() bool {
 	return true
 }
 
+func (r Registry) LifespanWriteValid() bool {
+	if !r.WriteValid() {
+		return false
+	}
+	var doc struct {
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Ref string `json:"$ref"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if json.Unmarshal(specs.API26, &doc) != nil {
+		return false
+	}
+	operation := doc.Paths["/admin/clients/{id}/lifespans"]["put"]
+	if !bytes.Contains(operation, []byte("#/components/schemas/oAuth2ClientTokenLifespans")) || !bytes.Contains(operation, []byte("#/components/schemas/oAuth2Client")) {
+		return false
+	}
+	properties := doc.Components.Schemas["oAuth2ClientTokenLifespans"].Properties
+	if len(properties) != len(allClientLifespanFields) {
+		return false
+	}
+	for _, name := range allClientLifespanFields {
+		if properties[name].Ref != "#/components/schemas/NullDuration" {
+			return false
+		}
+	}
+	return true
+}
+
 func (r Registry) TokenIntrospectValid() bool {
 	if !r.SpecValid() {
 		return false

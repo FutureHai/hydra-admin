@@ -98,6 +98,7 @@ func New(cfg *config.Config, web fs.FS, recorder *audit.Recorder, logger *slog.L
 	clients.GET("/:clientId", s.getClient)
 	clients.POST("", s.requireCSRF(), s.auditReady(), s.createClient)
 	clients.PATCH("/:clientId", s.requireCSRF(), s.auditReady(), s.patchClient)
+	clients.PUT("/:clientId/lifespans", s.requireCSRF(), s.auditReady(), s.setClientLifespans)
 	clients.DELETE("/:clientId", s.requireCSRF(), s.auditReady(), s.deleteClient)
 	clients.POST("/:clientId/secret/rotate", s.requireCSRF(), s.auditReady(), s.secretRotationUnavailable)
 	tokens := engine.Group("/api/v1/tokens")
@@ -217,7 +218,11 @@ func (s *Server) getClient(c *gin.Context) {
 	if report.BusinessAllowed("client_update") {
 		editable = hydra.WritableNames(false)
 	}
-	c.JSON(http.StatusOK, gin.H{"client": client, "revision": client.Revision(), "editable_fields": editable, "writable_schema": hydra.WritableSchema,
+	lifespanEditable := []string{}
+	if report.BusinessAllowed("client_lifespans_update") {
+		lifespanEditable = hydra.WritableLifespanNames()
+	}
+	c.JSON(http.StatusOK, gin.H{"client": client, "revision": client.Revision(), "editable_fields": editable, "editable_lifespan_fields": lifespanEditable, "writable_schema": hydra.WritableSchema,
 		"capabilities": report.Capabilities, "resource_catalog": s.Config.ResourceCatalog})
 }
 

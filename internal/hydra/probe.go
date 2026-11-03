@@ -3,7 +3,7 @@ package hydra
 import "context"
 
 var businessNames = []string{
-	"client_list", "client_detail", "client_create", "client_update", "client_delete",
+	"client_list", "client_detail", "client_create", "client_update", "client_lifespans_update", "client_delete",
 	"secret_rotate", "token_introspect", "token_revoke", "pagination",
 	"scopes", "audiences",
 }
@@ -76,6 +76,9 @@ func Probe(ctx context.Context, adapter HydraAdapter, registry Registry) Report 
 			for _, name := range []string{"client_create", "client_update", "client_delete"} {
 				r.Capabilities[name] = Capability{Enabled: true}
 			}
+		}
+		if _, ok := adapter.(ClientLifespanAdapter); ok && registry.LifespanWriteValid() {
+			r.Capabilities["client_lifespans_update"] = Capability{Enabled: true}
 		}
 		r.Capabilities["secret_rotate"] = Capability{Reason: "rotation_operation_absent"}
 		if tokenAdapter, ok := adapter.(TokenAdapter); ok && registry.TokenIntrospectValid() {

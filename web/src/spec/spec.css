@@ -134,6 +134,13 @@ html, body, #root { min-height: 100%; margin: 0; }
 .spec-client-section-head { margin-bottom: 16px; }
 .spec-client-section-head h2 { margin: 0 0 3px; color: #253244; font-size: 15px; line-height: 1.4; }
 .spec-client-section-head p { margin: 0; color: var(--color-text-secondary, #6b7280); font-size: 12px; line-height: 1.5; }
+.spec-client-advanced { padding: 18px 0; border-top: 1px solid #edf0f2; }
+.spec-client-advanced summary { width: fit-content; color: #253244; font-size: 15px; font-weight: 650; cursor: pointer; }
+.spec-client-advanced summary:hover { color: var(--color-primary); }
+.spec-client-advanced summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.spec-client-advanced > p { margin: 7px 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+.spec-client-advanced .spec-form-grid { margin-top: 16px; }
+.spec-advanced-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px; }
 .spec-client-form .spec-form-grid { column-gap: 20px; row-gap: 16px; }
 .spec-client-form .ant-form-item { margin-bottom: 0; }
 .spec-client-form .ant-form-item-label { padding-bottom: 4px; }
