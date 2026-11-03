@@ -69,13 +69,17 @@ func (a *HTTPAdapter) IntrospectToken(ctx context.Context, token string) (TokenI
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return TokenInfo{}, readFailure(502, "hydra_bad_response")
+		return TokenInfo{}, upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxClientReadBytes+1))
 	if err != nil || len(data) > maxClientReadBytes {
-		return TokenInfo{}, readFailure(502, "hydra_bad_response")
+		return TokenInfo{}, upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
-	return decodeTokenInfo(data)
+	info, decodeErr := decodeTokenInfo(data)
+	if decodeErr != nil {
+		decodeErr.UpstreamStatus = response.StatusCode
+	}
+	return info, decodeErr
 }
 
 func decodeTokenInfo(data []byte) (TokenInfo, *ReadError) {
@@ -177,7 +181,7 @@ func (a *HTTPAdapter) RevokeToken(ctx context.Context, token, clientID, secret s
 	}
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, 65537))
 	if readErr != nil || len(data) > 65536 || len(bytes.TrimSpace(data)) != 0 {
-		return readFailure(502, "hydra_bad_response")
+		return upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
 	return nil
 }
@@ -193,12 +197,12 @@ func tokenNetworkError(err error) *ReadError {
 func tokenStatusError(status int) *ReadError {
 	switch status {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
-		return readFailure(422, "hydra_validation_failed")
+		return upstreamFailure(422, "hydra_validation_failed", status)
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return readFailure(502, "hydra_upstream_denied")
+		return upstreamFailure(502, "hydra_upstream_denied", status)
 	case http.StatusConflict:
-		return readFailure(409, "hydra_conflict")
+		return upstreamFailure(409, "hydra_conflict", status)
 	default:
-		return readFailure(502, "hydra_bad_gateway")
+		return upstreamFailure(502, "hydra_bad_gateway", status)
 	}
 }

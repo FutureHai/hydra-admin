@@ -373,15 +373,15 @@ cp configs/config.example.yaml config.yaml
 make web-install
 make test
 make vet
-git status --short  # 发布前须为空；先提交当前修改
+git status --short  # 检查待发布改动；正式发布前将其提交
 git tag -a vX.Y.Z -m "vX.Y.Z"
 make release VERSION=X.Y.Z
 git push origin master vX.Y.Z
 ```
 
-将 `X.Y.Z` 换成待发布版本。发布构建要求工作树干净、HEAD 存在同版本 `vX.Y.Z` tag；可通过 `./scripts/package-release.sh X.Y.Z windows-amd64` 只构建指定目标。推送 tag 后，CI 使用 tag 版本重新构建、运行检查，并在全部平台检查通过后创建 GitHub Release 和上传六种包及校验文件。普通分支和 PR 只生成 `0.0.0-ci` 验证包，不发布 Release。
+将 `X.Y.Z` 换成待发布版本。发布构建要求 HEAD 存在同版本 `vX.Y.Z` tag，但不会因本地有未提交改动而拒绝构建；这种本地构建的 `version` 输出会在 commit 后标记 `-dirty`。若要让修改进入 GitHub Release，仍须先提交再创建 tag：推送 tag 后，CI 会从该提交重新构建、运行检查，并在全部平台检查通过后创建 Release 和上传六种包及校验文件。可通过 `./scripts/package-release.sh X.Y.Z windows-amd64` 只构建指定目标；普通分支和 PR 只生成 `0.0.0-ci` 验证包，不发布 Release。
 
-`make release` 默认生成 Linux、macOS、Windows 的 AMD64/ARM64 六种发布包；Linux/macOS 使用 tar.gz，Windows 使用 zip，各包含 `SHA256SUMS`，并附带包外 `.sha256`。Linux 包使用 `CGO_ENABLED=0` 静态构建：CI 在 Ubuntu 20.04 AMD64 容器中检查 Linux AMD64 包无动态加载器并验证服务启动；macOS、Windows runner 验证对应原生包能运行 `version`。其他架构仍需在目标环境验收；浏览器自动化目前使用 Chromium，尚无最低浏览器版本或全部浏览器的兼容性承诺。发布包包含示例配置和许可证信息，部署前必须替换占位值并在目标环境完成验收。构建脚本、测试和 CI 留在本仓库，使独立检出仍可验证和打包。
+`make release` 会先清理 `dist/` 中所有旧版和本版的发布解包目录、压缩包、同名 `.sha256` 及 `.release-build/`，再生成 Linux、macOS、Windows 的 AMD64/ARM64 六种发布包；`dist/hydra-admin` 等非发布文件不受影响。Linux/macOS 使用 tar.gz，Windows 使用 zip，各包含 `SHA256SUMS`，并附带包外 `.sha256`。Linux 包使用 `CGO_ENABLED=0` 静态构建：CI 在 Ubuntu 20.04 AMD64 容器中检查 Linux AMD64 包无动态加载器并验证服务启动；macOS、Windows runner 验证对应原生包能运行 `version`。其他架构仍需在目标环境验收；浏览器自动化目前使用 Chromium，尚无最低浏览器版本或全部浏览器的兼容性承诺。发布包包含示例配置和许可证信息，部署前必须替换占位值并在目标环境完成验收。构建脚本、测试和 CI 留在本仓库，使独立检出仍可验证和打包。
 
 | 平台或浏览器 | 当前验证范围 |
 | --- | --- |

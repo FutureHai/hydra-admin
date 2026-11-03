@@ -59,12 +59,7 @@ func encodeCursor(file string, offset int64, fingerprint string, q Query) string
 	return base64.RawURLEncoding.EncodeToString(data)
 }
 
-func fileFingerprint(path string, size int64) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
+func fileFingerprint(f *os.File, size int64) (string, error) {
 	length := min(size, 64)
 	data := make([]byte, length)
 	if length > 0 {
@@ -76,17 +71,21 @@ func fileFingerprint(path string, size int64) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
-func (r *Recorder) Query(q Query) (Page, error) {
-	if q.Limit < 1 || q.Limit > 100 || q.Offset < 0 || q.Offset > 1000 || len(q.Cursor) > 4096 || (q.Cursor != "" && q.Offset != 0) {
-		return Page{}, errors.New("invalid audit pagination")
-	}
+type auditSnapshotFile struct {
+	name string
+	file *os.File
+	size int64
+}
+
+// Open a bounded set of file handles while rotation is locked. The scan then
+// reads those handles without blocking audit appends or readiness checks.
+func (r *Recorder) snapshotFiles() ([]auditSnapshotFile, error) {
 	w := r.writer
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	page := Page{Items: []Event{}, Limit: q.Limit, Offset: q.Offset}
 	entries, err := os.ReadDir(filepath.Dir(w.path))
 	if err != nil {
-		return Page{}, err
+		return nil, err
 	}
 	prefix := filepath.Base(w.path) + "."
 	archives := []string{}
@@ -103,6 +102,49 @@ func (r *Recorder) Query(q Query) (Page, error) {
 		archives = archives[:w.maxArchives]
 	}
 	paths := append([]string{w.path}, archives...)
+	files := make([]auditSnapshotFile, 0, len(paths))
+	for _, path := range paths {
+		info, err := os.Lstat(path)
+		if err != nil {
+			closeSnapshotFiles(files)
+			return nil, err
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+			closeSnapshotFiles(files)
+			return nil, errors.New("unsafe audit file")
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			closeSnapshotFiles(files)
+			return nil, err
+		}
+		opened, err := f.Stat()
+		if err != nil || !os.SameFile(info, opened) {
+			f.Close()
+			closeSnapshotFiles(files)
+			return nil, errors.New("audit file changed while opening")
+		}
+		files = append(files, auditSnapshotFile{name: filepath.Base(path), file: f, size: opened.Size()})
+	}
+	return files, nil
+}
+
+func closeSnapshotFiles(files []auditSnapshotFile) {
+	for _, file := range files {
+		file.file.Close()
+	}
+}
+
+func (r *Recorder) Query(q Query) (Page, error) {
+	if q.Limit < 1 || q.Limit > 100 || q.Offset < 0 || q.Offset > 1000 || len(q.Cursor) > 4096 || (q.Cursor != "" && q.Offset != 0) {
+		return Page{}, errors.New("invalid audit pagination")
+	}
+	page := Page{Items: []Event{}, Limit: q.Limit, Offset: q.Offset}
+	files, err := r.snapshotFiles()
+	if err != nil {
+		return Page{}, err
+	}
+	defer closeSnapshotFiles(files)
 	startIndex := 0
 	startOffset := int64(-1)
 	expectedFingerprint := ""
@@ -116,8 +158,8 @@ func (r *Recorder) Query(q Query) (Page, error) {
 			return Page{}, ErrInvalidCursor
 		}
 		startIndex = -1
-		for i, path := range paths {
-			if filepath.Base(path) == cursor.File {
+		for i, file := range files {
+			if file.name == cursor.File {
 				startIndex, startOffset, expectedFingerprint = i, cursor.Offset, cursor.Fingerprint
 				break
 			}
@@ -128,26 +170,16 @@ func (r *Recorder) Query(q Query) (Page, error) {
 	}
 	remaining := maxScanBytes
 	matched := 0
-	for i := startIndex; i < len(paths); i++ {
-		path := paths[i]
-		info, err := os.Lstat(path)
-		if os.IsNotExist(err) {
-			return Page{}, ErrInvalidCursor
-		}
-		if err != nil {
-			return Page{}, err
-		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-			return Page{}, errors.New("unsafe audit file")
-		}
-		fingerprint, err := fileFingerprint(path, info.Size())
+	for i := startIndex; i < len(files); i++ {
+		file := files[i]
+		fingerprint, err := fileFingerprint(file.file, file.size)
 		if err != nil {
 			return Page{}, err
 		}
 		if i == startIndex && expectedFingerprint != "" && fingerprint != expectedFingerprint {
 			return Page{}, ErrInvalidCursor
 		}
-		position := info.Size()
+		position := file.size
 		if i == startIndex && startOffset >= 0 {
 			if startOffset > position {
 				return Page{}, ErrInvalidCursor
@@ -159,7 +191,7 @@ func (r *Recorder) Query(q Query) (Page, error) {
 		}
 		if remaining == 0 {
 			page.ScanTruncated = true
-			page.NextCursor = encodeCursor(filepath.Base(path), position, fingerprint, q)
+			page.NextCursor = encodeCursor(file.name, position, fingerprint, q)
 			page.HasMore = true
 			return page, nil
 		}
@@ -168,19 +200,11 @@ func (r *Recorder) Query(q Query) (Page, error) {
 			readSize = remaining
 		}
 		partial := readSize < position
-		f, err := os.Open(path)
-		if err != nil {
-			return Page{}, err
-		}
 		data := make([]byte, readSize)
 		dataStart := position - readSize
-		_, readErr := f.ReadAt(data, dataStart)
-		closeErr := f.Close()
+		_, readErr := file.file.ReadAt(data, dataStart)
 		if readErr != nil && readErr != io.EOF {
 			return Page{}, readErr
-		}
-		if closeErr != nil {
-			return Page{}, closeErr
 		}
 		remaining -= readSize
 		lines := bytes.Split(data, []byte{'\n'})
@@ -220,7 +244,7 @@ func (r *Recorder) Query(q Query) (Page, error) {
 			}
 			if len(page.Items) == q.Limit {
 				page.HasMore = true
-				page.NextCursor = encodeCursor(filepath.Base(path), segmentEnd, fingerprint, q)
+				page.NextCursor = encodeCursor(file.name, segmentEnd, fingerprint, q)
 				return page, nil
 			}
 			page.Items = append(page.Items, event)
@@ -235,7 +259,7 @@ func (r *Recorder) Query(q Query) (Page, error) {
 				page.ParseErrors++ // An individual record exceeds the scan window.
 			}
 			if resume > 0 {
-				page.NextCursor = encodeCursor(filepath.Base(path), resume, fingerprint, q)
+				page.NextCursor = encodeCursor(file.name, resume, fingerprint, q)
 				page.HasMore = true
 				return page, nil
 			}

@@ -111,3 +111,41 @@ func TestAuditCursorExpiresWhenCurrentFileRotates(t *testing.T) {
 		t.Fatalf("rotated file cursor accepted: %v", err)
 	}
 }
+
+func TestAuditSnapshotDoesNotBlockRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	w, err := NewRotatingWriter(path, 256, 2, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	r := NewRecorder(w)
+	if err := r.Append(Event{Action: "client.create", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := r.snapshotFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSnapshotFiles(files)
+	if len(files) != 1 || files[0].size == 0 {
+		t.Fatalf("unexpected snapshot: %+v", files)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.Write(bytes.Repeat([]byte("x"), 240))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("rotation blocked by open audit snapshot")
+	}
+	data := make([]byte, files[0].size)
+	if _, err := files[0].file.ReadAt(data, 0); err != nil || !bytes.Contains(data, []byte("client.create")) {
+		t.Fatalf("snapshot lost original event after rotation: %q, %v", data, err)
+	}
+}

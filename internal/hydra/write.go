@@ -290,12 +290,13 @@ func (a *HTTPAdapter) CreateClient(ctx context.Context, fields map[string]json.R
 	}
 	client, err := decodeClient(data)
 	if err != nil {
+		err.UpstreamStatus = http.StatusCreated
 		return CreateResult{}, err
 	}
 	var id string
 	_ = json.Unmarshal(fields["client_id"], &id)
 	if client.ClientID != id {
-		return CreateResult{}, readFailure(502, "hydra_bad_response")
+		return CreateResult{}, upstreamFailure(502, "hydra_bad_response", http.StatusCreated)
 	}
 	return CreateResult{Client: client, Secret: secret}, nil
 }
@@ -350,10 +351,11 @@ func (a *HTTPAdapter) PatchClient(ctx context.Context, id, baseline string, chan
 	}
 	updated, err := decodeClient(data)
 	if err != nil {
+		err.UpstreamStatus = http.StatusOK
 		return ClientRead{}, err
 	}
 	if updated.ClientID != id {
-		return ClientRead{}, readFailure(502, "hydra_bad_response")
+		return ClientRead{}, upstreamFailure(502, "hydra_bad_response", http.StatusOK)
 	}
 	return updated, nil
 }
@@ -414,10 +416,11 @@ func (a *HTTPAdapter) SetClientLifespans(ctx context.Context, id, baseline strin
 	}
 	updated, decodeErr := decodeClient(data)
 	if decodeErr != nil {
+		decodeErr.UpstreamStatus = http.StatusOK
 		return ClientRead{}, decodeErr
 	}
 	if updated.ClientID != id {
-		return ClientRead{}, readFailure(502, "hydra_bad_response")
+		return ClientRead{}, upstreamFailure(502, "hydra_bad_response", http.StatusOK)
 	}
 	return updated, nil
 }

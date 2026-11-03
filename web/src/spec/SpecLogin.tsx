@@ -19,7 +19,11 @@ export function SpecLogin() {
     try {
       await login(values.username, values.password)
     } catch (cause) {
-      setError(axios.isAxiosError(cause) && cause.response?.status === 429 ? '请求过于频繁，请稍后重试。' : '用户名或密码错误。')
+      const status = axios.isAxiosError(cause) ? cause.response?.status : undefined
+      setError(status === 401 ? '用户名或密码错误。'
+        : status === 403 ? '请求来源或安全校验失败，请检查访问地址与反向代理配置后重试。'
+          : status === 429 ? '请求过于频繁，请稍后重试。'
+            : '登录服务暂不可用，请稍后重试。')
     } finally {
       form.resetFields()
       setSubmitting(false)

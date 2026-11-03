@@ -76,6 +76,7 @@ const auditColumns: ColumnsType<AuditEvent> = [
   { title: '动作', dataIndex: 'action', width: 170 },
   { title: '目标 Client ID', dataIndex: 'target_id', width: 200, render: (value?: string) => <Machine>{value || '—'}</Machine> },
   { title: '结果', dataIndex: 'outcome', width: 110 },
+  { title: 'Hydra HTTP', dataIndex: 'hydra_status', width: 110, render: (value?: number) => <Machine>{value ?? '—'}</Machine> },
   { title: 'request_id', dataIndex: 'request_id', width: 220, render: (value?: string) => <Machine>{value || '—'}</Machine> },
 ]
 type AuditFilters = { from?: string; to?: string; action?: string; client_id?: string }
@@ -116,7 +117,7 @@ export function SpecAudit() {
       {error && <Alert type="error" showIcon title={error} className="spec-inline-alert" role="alert" />}
       {page?.scan_truncated && <Alert type="warning" showIcon title="本批已达到扫描窗口，可继续查找更早的记录" className="spec-inline-alert" />}
       {!!page?.parse_errors && <Alert type="warning" showIcon title={`已跳过 ${page.parse_errors} 条格式错误的审计记录`} className="spec-inline-alert" />}
-      <div className="spec-table-scroll"><Table<AuditEvent> size="small" columns={auditColumns} dataSource={page?.items ?? []} rowKey={(_, index) => `${cursors.length}-${index}`} loading={loading} pagination={false} scroll={{ x: 900 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={error ? '读取失败' : '本批没有匹配记录，可继续查找'} /> }} /></div>
+      <div className="spec-table-scroll"><Table<AuditEvent> size="small" columns={auditColumns} dataSource={page?.items ?? []} rowKey={(_, index) => `${cursors.length}-${index}`} loading={loading} pagination={false} scroll={{ x: 1000 }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={error ? '读取失败' : '本批没有匹配记录，可继续查找'} /> }} /></div>
       <div className="spec-table-footer">仅查询固定审计文件及轮转归档，每次最多 50 条。<Button size="small" disabled={cursors.length === 1 || loading} onClick={() => setCursors(value => value.slice(0, -1))}>上一页</Button> <Button size="small" disabled={!page?.next_cursor || loading} onClick={() => { if (page?.next_cursor) setCursors(value => [...value, page.next_cursor!]) }}>继续查找</Button> <Button size="small" onClick={() => setReload(value => value + 1)} loading={loading}>刷新</Button></div>
     </section>}
   </>

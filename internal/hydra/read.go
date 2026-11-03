@@ -27,13 +27,18 @@ type ClientPage struct {
 
 // ReadError contains only stable local codes, never an upstream body or URL.
 type ReadError struct {
-	Status int
-	Code   string
+	Status         int
+	Code           string
+	UpstreamStatus int
 }
 
 func (e *ReadError) Error() string { return e.Code }
 
 func readFailure(status int, code string) *ReadError { return &ReadError{Status: status, Code: code} }
+
+func upstreamFailure(status int, code string, upstreamStatus int) *ReadError {
+	return &ReadError{Status: status, Code: code, UpstreamStatus: upstreamStatus}
+}
 
 func (a *HTTPAdapter) ListClients(ctx context.Context) ([]ClientRead, *ReadError) {
 	page, err := a.ListClientPage(ctx, firstPageSize, "")
@@ -67,7 +72,7 @@ func (a *HTTPAdapter) ListClientPage(ctx context.Context, pageSize int, pageToke
 		clients = append(clients, client)
 	}
 	next, err := nextClientPageToken(result.links, pageSize)
-	if err != nil || (next == "" && len(result.links) == 0 && len(clients) == pageSize) || (next != "" && (len(clients) == 0 || next == pageToken)) {
+	if err != nil || (next != "" && (len(clients) == 0 || next == pageToken)) {
 		return ClientPage{}, readFailure(502, "hydra_bad_response")
 	}
 	return ClientPage{Items: clients, NextPageToken: next}, nil
@@ -148,10 +153,11 @@ func (a *HTTPAdapter) GetClient(ctx context.Context, id string) (ClientRead, *Re
 	}
 	client, err := decodeClient(result.data)
 	if err != nil {
+		err.UpstreamStatus = 200
 		return ClientRead{}, err
 	}
 	if client.ClientID != id {
-		return ClientRead{}, readFailure(502, "hydra_bad_response")
+		return ClientRead{}, upstreamFailure(502, "hydra_bad_response", 200)
 	}
 	return client, nil
 }
@@ -165,10 +171,10 @@ func (a *HTTPAdapter) ensureCompatible(ctx context.Context) *ReadError {
 		Version string `json:"version"`
 	}
 	if json.Unmarshal(result.data, &value) != nil || !safeVersion(value.Version) {
-		return readFailure(502, "hydra_bad_response")
+		return upstreamFailure(502, "hydra_bad_response", 200)
 	}
 	if !NewRegistry().Match(value.Version) || a.Tag() != value.Version || a.SpecSHA256() != SpecSHA26 {
-		return readFailure(409, "unsupported_version")
+		return upstreamFailure(409, "unsupported_version", 200)
 	}
 	return nil
 }

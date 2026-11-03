@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sync"
+
 	"hydra-admin/specs"
 )
 
@@ -26,6 +28,27 @@ var supported = map[string]Registration{
 	Version26: {Tag: Version26, SpecSHA256: SpecSHA26, VersionPath: "/version", ReadyPath: "/health/ready", ClientListPath: "/admin/clients", ClientDetailPath: "/admin/clients/{id}"},
 }
 
+var matchCheck struct {
+	once  sync.Once
+	valid bool
+}
+var writeCheck struct {
+	once  sync.Once
+	valid bool
+}
+var lifespanCheck struct {
+	once  sync.Once
+	valid bool
+}
+var introspectCheck struct {
+	once  sync.Once
+	valid bool
+}
+var revokeCheck struct {
+	once  sync.Once
+	valid bool
+}
+
 func NewRegistry() Registry { return Registry{} }
 
 func (Registry) SupportedVersions() []string { return []string{Version26} }
@@ -42,6 +65,11 @@ func (Registry) Match(version string) bool {
 	if !ok || registration.Tag != Version26 || registration.SpecSHA256 != SpecSHA26 {
 		return false
 	}
+	matchCheck.once.Do(func() { matchCheck.valid = validateMatch(registration) })
+	return matchCheck.valid
+}
+
+func validateMatch(registration Registration) bool {
 	digest := sha256.Sum256(specs.API26)
 	if hex.EncodeToString(digest[:]) != SpecSHA26 {
 		return false
@@ -104,6 +132,11 @@ func (r Registry) WriteValid() bool {
 	if !r.SpecValid() {
 		return false
 	}
+	writeCheck.once.Do(func() { writeCheck.valid = validateWrite() })
+	return writeCheck.valid
+}
+
+func validateWrite() bool {
 	var doc struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
@@ -127,6 +160,11 @@ func (r Registry) LifespanWriteValid() bool {
 	if !r.WriteValid() {
 		return false
 	}
+	lifespanCheck.once.Do(func() { lifespanCheck.valid = validateLifespanWrite() })
+	return lifespanCheck.valid
+}
+
+func validateLifespanWrite() bool {
 	var doc struct {
 		Paths      map[string]map[string]json.RawMessage `json:"paths"`
 		Components struct {
@@ -160,6 +198,11 @@ func (r Registry) TokenIntrospectValid() bool {
 	if !r.SpecValid() {
 		return false
 	}
+	introspectCheck.once.Do(func() { introspectCheck.valid = validateTokenIntrospect() })
+	return introspectCheck.valid
+}
+
+func validateTokenIntrospect() bool {
 	var doc struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
@@ -174,6 +217,11 @@ func (r Registry) TokenRevokeValid() bool {
 	if !r.TokenIntrospectValid() {
 		return false
 	}
+	revokeCheck.once.Do(func() { revokeCheck.valid = validateTokenRevoke() })
+	return revokeCheck.valid
+}
+
+func validateTokenRevoke() bool {
 	var doc struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}

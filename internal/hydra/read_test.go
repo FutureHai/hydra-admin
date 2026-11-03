@@ -107,7 +107,7 @@ func TestReadErrorMappingDoesNotLeakUpstreamBody(t *testing.T) {
 			defer server.Close()
 			adapter, _ := NewHTTPAdapter(server.URL, time.Second)
 			_, readErr := adapter.ListClients(context.Background())
-			if readErr == nil || readErr.Status != tt.wantStatus || readErr.Code != tt.code || strings.Contains(readErr.Error(), "secret") {
+			if readErr == nil || readErr.Status != tt.wantStatus || readErr.UpstreamStatus != tt.status || readErr.Code != tt.code || strings.Contains(readErr.Error(), "secret") {
 				t.Fatalf("error=%v", readErr)
 			}
 		})
@@ -197,6 +197,32 @@ func TestClientCursorPaginationUsesOnlyAllowlistedRequests(t *testing.T) {
 	}
 }
 
+func TestClientCursorFullFinalPageWithoutLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/version":
+			w.Write([]byte(`{"version":"v26.2.0"}`))
+		case "/admin/clients":
+			if r.Method != http.MethodGet || r.URL.RawQuery != "page_size=2" {
+				t.Errorf("unexpected list request: %s %s", r.Method, r.URL.String())
+			}
+			w.Write([]byte(`[{"client_id":"one"},{"client_id":"two"}]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	adapter, err := NewHTTPAdapter(server.URL, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, readErr := adapter.ListClientPage(context.Background(), 2, "")
+	if readErr != nil || len(page.Items) != 2 || page.NextPageToken != "" {
+		t.Fatalf("full final page: %+v, %v", page, readErr)
+	}
+}
+
 func TestClientCursorRejectsUntrustedNextLinks(t *testing.T) {
 	for _, link := range []string{
 		`broken-link`,
@@ -207,7 +233,6 @@ func TestClientCursorRejectsUntrustedNextLinks(t *testing.T) {
 		`</admin/clients?page_size=1&page_token=x>; rel="next"; rel="first"`,
 		`</admin/clients?page_size=1&page_token=x>; rel="next", </admin/clients?page_size=1&page_token=y>; rel="next"`,
 		`</admin/clients?page_size=1&page_token=x>; rel="next"`,
-		"",
 	} {
 		t.Run(link, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -228,23 +228,23 @@ func (a *HTTPAdapter) readJSON(ctx context.Context, operation readOperation, id 
 	case http.StatusOK:
 	case http.StatusNotFound:
 		if operation == readClientDetail {
-			return readResult{}, readFailure(404, "client_not_found")
+			return readResult{}, upstreamFailure(404, "client_not_found", response.StatusCode)
 		}
-		return readResult{}, readFailure(502, "hydra_bad_gateway")
+		return readResult{}, upstreamFailure(502, "hydra_bad_gateway", response.StatusCode)
 	case http.StatusConflict:
-		return readResult{}, readFailure(409, "hydra_conflict")
+		return readResult{}, upstreamFailure(409, "hydra_conflict", response.StatusCode)
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return readResult{}, readFailure(502, "hydra_upstream_denied")
+		return readResult{}, upstreamFailure(502, "hydra_upstream_denied", response.StatusCode)
 	default:
-		return readResult{}, readFailure(502, "hydra_bad_gateway")
+		return readResult{}, upstreamFailure(502, "hydra_bad_gateway", response.StatusCode)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return readResult{}, readFailure(502, "hydra_bad_response")
+		return readResult{}, upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxClientReadBytes+1))
 	if err != nil || len(data) > maxClientReadBytes {
-		return readResult{}, readFailure(502, "hydra_bad_response")
+		return readResult{}, upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
 	return readResult{data: data, links: response.Header.Values("Link")}, nil
 }
@@ -314,15 +314,15 @@ func (a *HTTPAdapter) doWriteJSON(ctx context.Context, method, target string, bo
 	if response.StatusCode != success {
 		switch response.StatusCode {
 		case http.StatusNotFound:
-			return nil, readFailure(404, "client_not_found")
+			return nil, upstreamFailure(404, "client_not_found", response.StatusCode)
 		case http.StatusConflict:
-			return nil, readFailure(409, "hydra_conflict")
+			return nil, upstreamFailure(409, "hydra_conflict", response.StatusCode)
 		case http.StatusBadRequest, http.StatusUnprocessableEntity:
-			return nil, readFailure(422, "hydra_validation_failed")
+			return nil, upstreamFailure(422, "hydra_validation_failed", response.StatusCode)
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return nil, readFailure(502, "hydra_upstream_denied")
+			return nil, upstreamFailure(502, "hydra_upstream_denied", response.StatusCode)
 		default:
-			return nil, readFailure(502, "hydra_bad_gateway")
+			return nil, upstreamFailure(502, "hydra_bad_gateway", response.StatusCode)
 		}
 	}
 	if success == http.StatusNoContent {
@@ -330,11 +330,11 @@ func (a *HTTPAdapter) doWriteJSON(ctx context.Context, method, target string, bo
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return nil, readFailure(502, "hydra_bad_response")
+		return nil, upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxClientReadBytes+1))
 	if err != nil || len(data) > maxClientReadBytes {
-		return nil, readFailure(502, "hydra_bad_response")
+		return nil, upstreamFailure(502, "hydra_bad_response", response.StatusCode)
 	}
 	return data, nil
 }

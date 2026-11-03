@@ -87,7 +87,7 @@ func TestTokenHTTPGuardsWhitelistAndAuditBoundary(t *testing.T) {
 		t.Fatal("revoke flow failed")
 	}
 	auditData, err := os.ReadFile(auditPath)
-	if err != nil || strings.Contains(string(auditData), "fixture-sensitive-token") || strings.Contains(string(auditData), "fixture-secret") {
+	if err != nil || strings.Contains(string(auditData), "fixture-sensitive-token") || strings.Contains(string(auditData), "fixture-secret") || !strings.Contains(string(auditData), `"hydra_status":200`) {
 		t.Fatal("token or secret leaked to audit")
 	}
 	s.Audit = failingAudit{}

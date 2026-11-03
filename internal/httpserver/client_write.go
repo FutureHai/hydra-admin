@@ -103,9 +103,12 @@ func (s *Server) clientWriter(c *gin.Context, capability string) (hydra.ClientWr
 	return writer, true
 }
 
-func (s *Server) auditClient(c *gin.Context, action, outcome, id string, fields []string) bool {
+func (s *Server) auditClient(c *gin.Context, action, outcome, id string, fields []string, hydraStatus ...int) bool {
 	session := c.MustGet("session").(auth.Session)
 	event := audit.Event{Action: action, Outcome: outcome, Actor: session.Username, SourceIP: s.sourceIP(c), RequestID: c.GetString("request_id"), TargetType: "client", TargetID: id, ChangedFields: fields}
+	if len(hydraStatus) > 0 {
+		event.HydraStatus = hydraStatus[0]
+	}
 	if err := s.Audit.Append(event); err != nil {
 		// The upstream state may already have changed. Never retry or roll back.
 		s.Logger.Error("CRITICAL client audit append failed after Hydra operation", "request_id", c.GetString("request_id"), "action", action, "client_id", id, "error", err)
@@ -153,12 +156,12 @@ func (s *Server) createClient(c *gin.Context) {
 	}
 	result, err := w.CreateClient(c.Request.Context(), input.Fields)
 	if err != nil {
-		if s.auditClient(c, "client.create", "failure", id, fields) {
+		if s.auditClient(c, "client.create", "failure", id, fields, err.UpstreamStatus) {
 			s.failHydraWrite(c, err)
 		}
 		return
 	}
-	if !s.auditClient(c, "client.create", "success", result.Client.ClientID, fields) {
+	if !s.auditClient(c, "client.create", "success", result.Client.ClientID, fields, http.StatusCreated) {
 		return
 	}
 	c.JSON(http.StatusCreated, result)
@@ -187,7 +190,7 @@ func (s *Server) patchClient(c *gin.Context) {
 	if s.Config.ResourceCatalog.Enabled() && (input.Changes["scope"] != nil || input.Changes["audience"] != nil) {
 		current, readErr := s.HydraAdapter.GetClient(c.Request.Context(), id)
 		if readErr != nil {
-			if s.auditClient(c, "client.update", "failure", id, fields) {
+			if s.auditClient(c, "client.update", "failure", id, fields, readErr.UpstreamStatus) {
 				s.failHydraRead(c, readErr)
 			}
 			return
@@ -207,12 +210,12 @@ func (s *Server) patchClient(c *gin.Context) {
 	}
 	client, err := w.PatchClient(c.Request.Context(), id, input.BaseRevision, input.Changes)
 	if err != nil {
-		if s.auditClient(c, "client.update", "failure", id, fields) {
+		if s.auditClient(c, "client.update", "failure", id, fields, err.UpstreamStatus) {
 			s.failHydraWrite(c, err)
 		}
 		return
 	}
-	if !s.auditClient(c, "client.update", "success", id, fields) {
+	if !s.auditClient(c, "client.update", "success", id, fields, http.StatusOK) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"client": client, "revision": client.Revision()})
@@ -247,12 +250,12 @@ func (s *Server) setClientLifespans(c *gin.Context) {
 	}
 	client, err := lifespans.SetClientLifespans(c.Request.Context(), id, input.BaseRevision, input.Changes)
 	if err != nil {
-		if s.auditClient(c, "client.lifespans_update", "failure", id, fields) {
+		if s.auditClient(c, "client.lifespans_update", "failure", id, fields, err.UpstreamStatus) {
 			s.failHydraWrite(c, err)
 		}
 		return
 	}
-	if !s.auditClient(c, "client.lifespans_update", "success", id, fields) {
+	if !s.auditClient(c, "client.lifespans_update", "success", id, fields, http.StatusOK) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"client": client, "revision": client.Revision()})
@@ -271,12 +274,12 @@ func (s *Server) deleteClient(c *gin.Context) {
 		return
 	}
 	if err := w.DeleteClient(c.Request.Context(), id); err != nil {
-		if s.auditClient(c, "client.delete", "failure", id, nil) {
+		if s.auditClient(c, "client.delete", "failure", id, nil, err.UpstreamStatus) {
 			s.failHydraWrite(c, err)
 		}
 		return
 	}
-	if !s.auditClient(c, "client.delete", "success", id, nil) {
+	if !s.auditClient(c, "client.delete", "success", id, nil, http.StatusNoContent) {
 		return
 	}
 	c.Status(http.StatusNoContent)

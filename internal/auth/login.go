@@ -52,6 +52,6 @@ func (s *LoginService) Attempt(input LoginInput, now time.Time) LoginOutcome {
 	if err != nil {
 		return LoginOutcome{Status: http.StatusInternalServerError, Message: "登录服务暂不可用"}
 	}
-	s.Limiter.RecordSuccess(input.Username)
+	s.Limiter.RecordSuccess(input.SourceIP, input.Username)
 	return LoginOutcome{Status: http.StatusOK, Session: session}
 }

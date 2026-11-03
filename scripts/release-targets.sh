@@ -27,3 +27,23 @@ release_init() {
     seen_targets+="$target|"
   done
 }
+
+# Remove generated release outputs from earlier builds, including packages for
+# other versions and targets. Leave the development binary and unrelated files
+# in dist untouched.
+release_clean_artifacts() {
+  local dist_dir="$1" artifact name
+  if [[ -L "$dist_dir" ]]; then
+    echo "release output directory must not be a symlink: $dist_dir" >&2
+    return 1
+  fi
+  mkdir -p "$dist_dir"
+  rm -rf -- "$dist_dir/.release-build"
+  for artifact in "$dist_dir"/hydra-admin-v*; do
+    [[ -e "$artifact" || -L "$artifact" ]] || continue
+    name="${artifact##*/}"
+    if [[ "$name" =~ ^hydra-admin-v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?-((linux|darwin)-(amd64|arm64)(\.tar\.gz(\.sha256)?)?|windows-(amd64|arm64)(\.zip(\.sha256)?)?)$ ]]; then
+      rm -rf -- "$artifact"
+    fi
+  done
+}

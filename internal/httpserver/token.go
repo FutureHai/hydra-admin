@@ -66,9 +66,12 @@ func (s *Server) auditRejectedTokenRequest(c *gin.Context) bool {
 	return true
 }
 
-func (s *Server) auditToken(c *gin.Context, action, outcome, clientID string) bool {
+func (s *Server) auditToken(c *gin.Context, action, outcome, clientID string, hydraStatus ...int) bool {
 	session := c.MustGet("session").(auth.Session)
 	event := audit.Event{Action: action, Outcome: outcome, Actor: session.Username, SourceIP: s.sourceIP(c), RequestID: c.GetString("request_id"), TargetType: "token", TargetID: clientID}
+	if len(hydraStatus) > 0 {
+		event.HydraStatus = hydraStatus[0]
+	}
 	if err := s.Audit.Append(event); err != nil {
 		s.Logger.Error("CRITICAL token audit append failed", "request_id", c.GetString("request_id"), "action", action, "error", err)
 		s.fail(c, 500, "audit_write_failed", "Hydra 操作可能已成功但审计写入失败，请按 Client ID 核验")
@@ -92,12 +95,12 @@ func (s *Server) introspectToken(c *gin.Context) {
 	result, readErr := adapter.IntrospectToken(c.Request.Context(), input.Token)
 	input.Token = ""
 	if readErr != nil {
-		if s.auditToken(c, "token.introspect", "failure", "") {
+		if s.auditToken(c, "token.introspect", "failure", "", readErr.UpstreamStatus) {
 			s.failToken(c, readErr)
 		}
 		return
 	}
-	if !s.auditToken(c, "token.introspect", "success", result.ClientID) {
+	if !s.auditToken(c, "token.introspect", "success", result.ClientID, http.StatusOK) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -125,12 +128,12 @@ func (s *Server) revokeToken(c *gin.Context) {
 	input.Token = ""
 	input.ClientSecret = ""
 	if err != nil {
-		if s.auditToken(c, "token.revoke", "failure", input.ClientID) {
+		if s.auditToken(c, "token.revoke", "failure", input.ClientID, err.UpstreamStatus) {
 			s.failToken(c, err)
 		}
 		return
 	}
-	if !s.auditToken(c, "token.revoke", "success", input.ClientID) {
+	if !s.auditToken(c, "token.revoke", "success", input.ClientID, http.StatusOK) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"accepted": true})

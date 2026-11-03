@@ -114,6 +114,10 @@ func TestClientWriteGuardsAndPostWriteAuditFailure(t *testing.T) {
 	if got := request(t, s, "PUT", lifespanURL, lifespanBody, cookies, map[string]string{"Origin": "http://127.0.0.1:8085", "X-CSRF-Token": token}); got.Code != 200 || lifespanCalls != 1 {
 		t.Fatalf("audited lifespan PUT failed: status=%d calls=%d", got.Code, lifespanCalls)
 	}
+	auditPage, err := s.auditReader.Query(audit.Query{Action: "client.lifespans_update", Limit: 10})
+	if err != nil || len(auditPage.Items) < 2 || auditPage.Items[0].HydraStatus != http.StatusOK || auditPage.Items[1].HydraStatus != 0 {
+		t.Fatalf("upstream and local audit statuses: %+v, %v", auditPage, err)
+	}
 	s.Audit = failingAudit{}
 	response := request(t, s, "POST", url, body, cookies, map[string]string{"Origin": "http://127.0.0.1:8085", "X-CSRF-Token": token})
 	if response.Code != 500 || postCalls != 1 || response.Header().Get("X-Request-ID") == "" || !strings.Contains(response.Body.String(), `"code":"audit_write_failed"`) || !strings.Contains(response.Body.String(), "可能已成功") {

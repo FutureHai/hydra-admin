@@ -123,8 +123,9 @@ func (l *LoginLimiter) RecordFailure(ip, username string, now time.Time) {
 	l.trimLocked(l.users)
 }
 
-func (l *LoginLimiter) RecordSuccess(username string) {
+func (l *LoginLimiter) RecordSuccess(ip, username string) {
 	l.mu.Lock()
+	delete(l.ip, normalizedIP(ip))
 	delete(l.users, normalizedUser(username))
 	l.mu.Unlock()
 }

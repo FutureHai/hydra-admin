@@ -54,3 +54,22 @@ func TestConcurrentLoginReservation(t *testing.T) {
 		t.Fatalf("admitted %d concurrent attempts, want 3", admitted.Load())
 	}
 }
+
+func TestSuccessfulLoginClearsIPAttempts(t *testing.T) {
+	l := NewLoginLimiter(time.Minute, 3, 10, time.Minute)
+	now := time.Unix(1000, 0)
+	for i := 0; i < 10; i++ {
+		if decision := l.Begin("192.0.2.10", "admin", now); !decision.Allowed {
+			t.Fatalf("successful login %d was limited: %+v", i, decision)
+		}
+		l.RecordSuccess("192.0.2.10", "admin")
+	}
+	for i := 0; i < 3; i++ {
+		if decision := l.Begin("192.0.2.10", "wrong", now); !decision.Allowed {
+			t.Fatalf("failed attempt %d was limited too soon: %+v", i, decision)
+		}
+	}
+	if decision := l.Begin("192.0.2.10", "wrong", now); decision.Status != http.StatusTooManyRequests {
+		t.Fatalf("failed attempts did not retain the IP limit: %+v", decision)
+	}
+}
