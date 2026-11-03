@@ -40,7 +40,7 @@ export async function deleteClient(clientId: string): Promise<void> {
 export function clientErrorMessage(error: unknown): string {
   const code = axios.isAxiosError(error) ? (error.response?.data as { code?: unknown } | undefined)?.code : undefined
   switch (code) {
-    case 'unsupported_version': return 'Hydra 运行版本与内置适配器不匹配，Client 读取已关闭。'
+    case 'embedded_spec_invalid': return '内置 Hydra 规范校验失败，Client 能力不可用。'
     case 'unavailable': return '当前环境的 Client 能力不可用。'
     case 'hydra_timeout': return 'Hydra 请求超时，写入结果可能未确认；请先按 Client ID 核验，勿直接重复提交。'
     case 'hydra_conflict': return 'Hydra 返回冲突，请核验当前 Client 状态。'

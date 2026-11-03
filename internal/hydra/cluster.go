@@ -74,7 +74,7 @@ func (a *ClusterAdapter) Report(ctx context.Context) Report {
 		a.mu.RUnlock()
 		// A slow or unreachable replica must not delay healthy business traffic.
 		// The previous snapshot can only nominate candidates; choose also checks
-		// readiness and version against the chosen endpoint immediately.
+		// readiness against the chosen endpoint immediately.
 		if stale && a.refreshMu.TryLock() {
 			go func() {
 				defer a.refreshMu.Unlock()
@@ -127,7 +127,7 @@ func (a *ClusterAdapter) probeAndStore(ctx context.Context) Report {
 	result := reports[selected]
 	result.Replicas = statuses
 	if !result.BusinessAllowed("client_list") {
-		result.Diagnostic = "没有健康且版本匹配的 Hydra 副本"
+		result.Diagnostic = "没有通过健康与 Client 列表探测的 Hydra 副本"
 	}
 	a.mu.Lock()
 	a.last, a.checked = result, time.Now()
@@ -138,9 +138,6 @@ func (a *ClusterAdapter) probeAndStore(ctx context.Context) Report {
 func (a *ClusterAdapter) choose(ctx context.Context, capability string) (*HTTPAdapter, *ReadError) {
 	report := a.Report(ctx)
 	if !report.BusinessAllowed(capability) {
-		if report.Status == "unsupported_version" {
-			return nil, readFailure(409, "unsupported_version")
-		}
 		return nil, readFailure(503, "unavailable")
 	}
 	start := int(a.next.Add(1)-1) % len(a.replicas)
@@ -153,10 +150,7 @@ func (a *ClusterAdapter) choose(ctx context.Context, capability string) (*HTTPAd
 		if adapter.Ready(ctx) != ProbeOK {
 			continue
 		}
-		version, probe := adapter.Version(ctx)
-		if probe == ProbeOK && NewRegistry().Match(version) {
-			return adapter, nil
-		}
+		return adapter, nil
 	}
 	return nil, readFailure(503, "unavailable")
 }

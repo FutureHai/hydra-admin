@@ -29,7 +29,7 @@ const capabilityNames: { key: string; name: string }[] = [
 
 export function reasonLabel(reason: string | undefined): string {
   switch (reason) {
-    case 'unsupported_version': return '运行版本不匹配'
+    case 'embedded_spec_invalid': return '内置 Hydra 规范校验失败'
     case 'not_implemented_in_this_phase': return '当前阶段尚未实现'
     case 'client_list_probe_failed': return 'Client 列表只读探测未通过'
     case 'rotation_operation_absent': return '固定规范没有独立 Secret 轮换端点'
@@ -74,9 +74,9 @@ function StatusMetrics({ status }: { status: HydraStatus | null }) {
   const replicas = status?.replicas ?? []
   const ready = replicas.filter(replica => replica.eligible).length
   return <div className="spec-metric-grid">
-    <Metric icon={<CloudServerOutlined />} name="可用副本" value={status ? (replicas.length ? `${ready}/${replicas.length} 副本可用` : status.health_probe === 'ok' ? '已就绪' : '未就绪') : '读取中'} detail="健康且版本匹配的 Admin 副本" tone={replicas.length ? ready > 0 ? 'success' : 'unknown' : status?.health_probe === 'ok' ? 'success' : 'unknown'} />
-    <Metric icon={<DatabaseOutlined />} name="运行版本" value={status?.observed_version ?? '—'} detail={`内置适配版本 ${status?.supported_version ?? '—'}`} tone={status?.status === 'supported' ? 'success' : 'unknown'} />
-    <Metric icon={<ApiOutlined />} name="Admin Client 读取" value={status ? (status.capabilities.client_list?.enabled ? '只读可用' : '不可用') : '读取中'} detail="读取前会再次检查实际版本" tone={status?.capabilities.client_list?.enabled ? 'success' : 'unknown'} />
+    <Metric icon={<CloudServerOutlined />} name="可用副本" value={status ? (replicas.length ? `${ready}/${replicas.length} 副本可用` : status.health_probe === 'ok' ? '已就绪' : '未就绪') : '读取中'} detail="通过健康与 Client 列表探测的 Admin 副本" tone={replicas.length ? ready > 0 ? 'success' : 'unknown' : status?.health_probe === 'ok' ? 'success' : 'unknown'} />
+    <Metric icon={<DatabaseOutlined />} name="运行版本" value={status?.observed_version ?? '—'} detail={`开发基准 ${status?.development_baseline ?? '—'}`} tone={status?.version_probe === 'ok' ? 'success' : 'unknown'} />
+    <Metric icon={<ApiOutlined />} name="Admin Client 读取" value={status ? (status.capabilities.client_list?.enabled ? '只读可用' : '不可用') : '读取中'} detail="由健康状态与只读探测确认" tone={status?.capabilities.client_list?.enabled ? 'success' : 'unknown'} />
     <Metric icon={<SafetyCertificateOutlined />} name="Public API 探测" value="未检测" detail="启动检查不对 Public API 发起写请求" />
   </div>
 }
@@ -93,10 +93,11 @@ export function SpecOverview() {
       <div className="spec-table-scroll"><Table<CapabilityRow> size="small" columns={capabilityColumns} dataSource={capabilityRows(status)} pagination={false} rowKey="key" scroll={{ x: 760 }} /></div>
     </section>
     <div className="spec-bottom-grid">
-      <section className="spec-panel" aria-labelledby="spec-summary-heading"><div className="spec-panel-head"><div><h2 id="spec-summary-heading">规范摘要</h2><p>当前运行实例与固定规范</p></div><FileProtectOutlined className="spec-panel-head-icon" /></div>
+      <section className="spec-panel" aria-labelledby="spec-summary-heading"><div className="spec-panel-head"><div><h2 id="spec-summary-heading">规范摘要</h2><p>基于 Hydra v26.2.0 开发</p></div><FileProtectOutlined className="spec-panel-head-icon" /></div>
         <div className="spec-detail-row"><span>运行版本</span><Machine>{status?.observed_version ?? '—'}</Machine></div>
+        <div className="spec-detail-row"><span>开发基准</span><Machine>{status?.development_baseline ?? '—'}</Machine></div>
         <div className="spec-detail-row"><span>规范 SHA-256</span><Tooltip title={status?.spec_sha256 ?? '正在读取'}><Machine>{status?.spec_sha256 ?? '—'}</Machine></Tooltip></div>
-        <ReasonBlock title={status?.status === 'supported' ? '规范已匹配' : '能力关闭'}>{status?.diagnostic ?? (status?.status === 'supported' ? 'Client 和 Token 操作按能力矩阵开放；Secret 轮换没有独立端点。' : '等待或无法取得匹配的运行版本。')}</ReasonBlock>
+        <ReasonBlock title={status?.capabilities.client_list?.enabled ? '连接可用' : '能力不可用'}>{status?.diagnostic ?? '业务能力由健康状态、Client 列表探测和配置决定。'}</ReasonBlock>
       </section>
       <section className="spec-panel" aria-labelledby="spec-audit-heading"><div className="spec-panel-head"><div><h2 id="spec-audit-heading">审计记录</h2><p>查询实际管理操作</p></div><Link to="/audit" className="spec-text-link">查看审计</Link></div><p className="spec-muted">在审计页按时间、动作与 Client ID 筛选服务端审计记录。</p></section>
     </div>
@@ -106,17 +107,18 @@ export function SpecOverview() {
 export function SpecSystem() {
   const { status, error } = useHydraStatus()
   return <>
-    <PageHeading kicker="工作空间 / 系统状态" title="系统状态" description="查看实例连接、规范匹配与当前能力。" />
+    <PageHeading kicker="工作空间 / 系统状态" title="系统状态" description="查看实例连接、开发基准版本与当前能力。" />
     {error && <Alert type="error" showIcon className="spec-inline-alert" title="无法读取状态报告" />}
     <StatusMetrics status={status} />
     <section className="spec-panel spec-system-panel"><div className="spec-panel-head"><div><h2>能力与规范</h2><p>Client 与 Token 能力均以当前矩阵为准。</p></div></div>
       <div className="spec-detail-row"><span>运行版本</span><Machine>{status?.observed_version ?? '—'}</Machine></div>
+      <div className="spec-detail-row"><span>开发基准</span><Machine>{status?.development_baseline ?? '—'}</Machine></div>
       <div className="spec-detail-row"><span>规范 SHA-256</span><Machine>{status?.spec_sha256 ?? '—'}</Machine></div>
       <div className="spec-detail-row"><span>Client 列表探测</span><Machine>{status?.client_list_probe ?? '—'}</Machine></div>
       <div className="spec-detail-row"><span>生产写入验收</span><Machine>{status?.write_acceptance === 'not_verified_in_this_deployment' ? '当前部署未验证' : status?.write_acceptance ?? '—'}</Machine></div>
-      <ReasonBlock title={status?.status === 'supported' ? '版本已匹配' : '能力关闭'}>{status?.diagnostic ?? 'Client 读取取决于版本与只读探测结果。'}</ReasonBlock>
+      <ReasonBlock title={status?.capabilities.client_list?.enabled ? '连接可用' : '能力不可用'}>{status?.diagnostic ?? 'Client 读取取决于健康状态与只读探测结果。'}</ReasonBlock>
     </section>
-    <section className="spec-panel spec-capabilities" aria-labelledby="spec-replicas-heading"><div className="spec-panel-head"><div><h2 id="spec-replicas-heading">Hydra 副本</h2><p>每 15 秒读取状态；业务请求只选择健康且版本匹配的副本。</p></div><span className="spec-panel-count">{status?.replicas?.length ?? 0} 个副本</span></div><div className="spec-table-scroll"><Table<ReplicaRow> size="small" columns={replicaColumns} dataSource={status?.replicas ?? []} pagination={false} rowKey="name" scroll={{ x: 820 }} /></div></section>
-    <section className="spec-panel spec-capabilities" aria-labelledby="spec-system-capabilities-heading"><div className="spec-panel-head"><div><h2 id="spec-system-capabilities-heading">能力矩阵与禁用原因</h2><p>当前进程内的版本适配与只读探测结果；开放能力不代表当前部署已完成生产写入验收。</p></div><span className="spec-panel-count">{capabilityNames.length} 项能力</span></div><div className="spec-table-scroll"><Table<CapabilityRow> size="small" columns={capabilityColumns} dataSource={capabilityRows(status)} pagination={false} rowKey="key" scroll={{ x: 760 }} /></div></section>
+    <section className="spec-panel spec-capabilities" aria-labelledby="spec-replicas-heading"><div className="spec-panel-head"><div><h2 id="spec-replicas-heading">Hydra 副本</h2><p>每 15 秒读取状态；业务请求只选择通过健康与 Client 列表探测的副本。</p></div><span className="spec-panel-count">{status?.replicas?.length ?? 0} 个副本</span></div><div className="spec-table-scroll"><Table<ReplicaRow> size="small" columns={replicaColumns} dataSource={status?.replicas ?? []} pagination={false} rowKey="name" scroll={{ x: 820 }} /></div></section>
+    <section className="spec-panel spec-capabilities" aria-labelledby="spec-system-capabilities-heading"><div className="spec-panel-head"><div><h2 id="spec-system-capabilities-heading">能力矩阵与禁用原因</h2><p>当前进程内的接口约束与只读探测结果；开放能力不代表当前部署已完成生产写入验收。</p></div><span className="spec-panel-count">{capabilityNames.length} 项能力</span></div><div className="spec-table-scroll"><Table<CapabilityRow> size="small" columns={capabilityColumns} dataSource={capabilityRows(status)} pagination={false} rowKey="key" scroll={{ x: 760 }} /></div></section>
   </>
 }

@@ -45,10 +45,7 @@ func (a *HTTPAdapter) IntrospectToken(ctx context.Context, token string) (TokenI
 		return TokenInfo{}, readFailure(422, "validation_failed")
 	}
 	if !NewRegistry().TokenIntrospectValid() {
-		return TokenInfo{}, readFailure(409, "unsupported_version")
-	}
-	if err := a.ensureCompatible(ctx); err != nil {
-		return TokenInfo{}, err
+		return TokenInfo{}, readFailure(503, "embedded_spec_invalid")
 	}
 	form := url.Values{"token": {token}}
 	u := *a.base
@@ -136,7 +133,7 @@ func (a *HTTPAdapter) RevokeToken(ctx context.Context, token, clientID, secret s
 		return readFailure(503, "revoke_not_configured")
 	}
 	if !NewRegistry().TokenRevokeValid() {
-		return readFailure(409, "unsupported_version")
+		return readFailure(503, "embedded_spec_invalid")
 	}
 	if !validToken(token) || !validClientID(clientID) || secret == "" || len(secret) > 4096 || strings.ContainsAny(secret, "\x00\r\n") {
 		return readFailure(422, "validation_failed")

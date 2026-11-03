@@ -93,8 +93,8 @@ func TestWriteWhitelistPatchIsolationAndNoRetry(t *testing.T) {
 		t.Fatal("replacement PUT reached Hydra")
 	}
 	version = "v26.2.1"
-	if err := a.DeleteClient(ctx, "test-id"); err == nil || err.Code != "unsupported_version" || deleteCalls != 1 {
-		t.Fatal("version mismatch allowed deletion")
+	if err := a.DeleteClient(ctx, "test-id"); err != nil || deleteCalls != 2 {
+		t.Fatal("runtime version change blocked deletion")
 	}
 }
 

@@ -24,7 +24,7 @@ type Registration struct {
 	ClientDetailPath string
 }
 
-var supported = map[string]Registration{
+var baselineRegistrations = map[string]Registration{
 	Version26: {Tag: Version26, SpecSHA256: SpecSHA26, VersionPath: "/version", ReadyPath: "/health/ready", ClientListPath: "/admin/clients", ClientDetailPath: "/admin/clients/{id}"},
 }
 
@@ -51,11 +51,9 @@ var revokeCheck struct {
 
 func NewRegistry() Registry { return Registry{} }
 
-func (Registry) SupportedVersions() []string { return []string{Version26} }
-
-// Lookup is deliberately closed: new release tags require a source change.
+// Lookup describes the embedded development baseline, not a runtime gate.
 func (Registry) Lookup(version string) (Registration, bool) {
-	registration, ok := supported[version]
+	registration, ok := baselineRegistrations[version]
 	return registration, ok
 }
 

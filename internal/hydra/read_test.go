@@ -76,8 +76,8 @@ func TestReadClientsKeepsUnknownFieldsAndRedactsSecrets(t *testing.T) {
 		t.Fatal("unsafe id accepted")
 	}
 	version = "v26.2.1"
-	if _, readErr := adapter.ListClients(context.Background()); readErr == nil || readErr.Code != "unsupported_version" || listCalls != 1 {
-		t.Fatalf("runtime version change not gated: error=%v listCalls=%d", readErr, listCalls)
+	if _, readErr := adapter.ListClients(context.Background()); readErr != nil || listCalls != 2 {
+		t.Fatalf("runtime version change blocked Client read: error=%v listCalls=%d", readErr, listCalls)
 	}
 }
 

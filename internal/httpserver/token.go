@@ -21,13 +21,6 @@ type revokeRequest struct {
 
 func (s *Server) tokenAdapter(c *gin.Context, capability string) (hydra.TokenAdapter, bool) {
 	report := s.currentHydraReport(c.Request.Context())
-	if report.Status == "unsupported_version" {
-		if !s.auditRejectedTokenRequest(c) {
-			return nil, false
-		}
-		s.fail(c, 409, "unsupported_version", "Hydra 运行版本不受支持")
-		return nil, false
-	}
 	adapter, ok := s.HydraAdapter.(hydra.TokenAdapter)
 	if !ok || !report.BusinessAllowed(capability) {
 		if !s.auditRejectedTokenRequest(c) {
@@ -142,8 +135,8 @@ func (s *Server) revokeToken(c *gin.Context) {
 func (s *Server) failToken(c *gin.Context, err *hydra.ReadError) {
 	message := "Hydra 请求失败；如执行了撤销，请先核验状态，勿直接重复提交"
 	switch err.Code {
-	case "unsupported_version":
-		message = "Hydra 运行版本不受支持"
+	case "embedded_spec_invalid":
+		message = "内置 Hydra 规范校验失败"
 	case "validation_failed", "hydra_validation_failed":
 		message = "Token 请求字段无效"
 	case "token_owner_unconfirmed":

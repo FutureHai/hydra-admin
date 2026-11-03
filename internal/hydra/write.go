@@ -265,9 +265,6 @@ func (a *HTTPAdapter) CreateClient(ctx context.Context, fields map[string]json.R
 	if err := ValidateFields(fields, true); err != nil {
 		return CreateResult{}, err
 	}
-	if err := a.ensureCompatible(ctx); err != nil {
-		return CreateResult{}, err
-	}
 	body := make(map[string]json.RawMessage, len(fields)+1)
 	for k, v := range fields {
 		body[k] = v
@@ -371,7 +368,7 @@ func (a *HTTPAdapter) SetClientLifespans(ctx context.Context, id, baseline strin
 		return ClientRead{}, err
 	}
 	if !NewRegistry().LifespanWriteValid() {
-		return ClientRead{}, readFailure(409, "unsupported_version")
+		return ClientRead{}, readFailure(503, "embedded_spec_invalid")
 	}
 	current, err := a.GetClient(ctx, id)
 	if err != nil {
@@ -438,9 +435,6 @@ func sameClientDuration(a, b json.RawMessage) bool {
 func (a *HTTPAdapter) DeleteClient(ctx context.Context, id string) *ReadError {
 	if !validClientID(id) {
 		return readFailure(400, "invalid_client_id")
-	}
-	if err := a.ensureCompatible(ctx); err != nil {
-		return err
 	}
 	_, err := a.writeJSON(ctx, http.MethodDelete, id, nil, http.StatusNoContent)
 	return err

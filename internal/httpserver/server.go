@@ -148,10 +148,6 @@ func (s *Server) systemStatus(c *gin.Context) {
 
 func (s *Server) businessUnavailable() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if s.currentHydraReport(c.Request.Context()).Status == "unsupported_version" {
-			s.fail(c, http.StatusConflict, "unsupported_version", "Hydra 运行版本不受支持")
-			return
-		}
 		s.fail(c, http.StatusServiceUnavailable, "unavailable", "业务操作尚未实现")
 	}
 }
@@ -160,19 +156,11 @@ func (s *Server) secretRotationUnavailable(c *gin.Context) {
 	if !s.auditClient(c, "client.rotate", "failure", c.Param("clientId"), nil) {
 		return
 	}
-	if s.currentHydraReport(c.Request.Context()).Status == "unsupported_version" {
-		s.fail(c, http.StatusConflict, "unsupported_version", "Hydra 运行版本不受支持")
-		return
-	}
 	s.fail(c, http.StatusServiceUnavailable, "rotation_operation_absent", "固定版本规范没有独立 Secret 轮换操作")
 }
 
 func (s *Server) clientReadReady(c *gin.Context, capability string) bool {
 	report := s.currentHydraReport(c.Request.Context())
-	if report.Status == "unsupported_version" {
-		s.fail(c, http.StatusConflict, "unsupported_version", "Hydra 运行版本不受支持")
-		return false
-	}
 	if s.HydraAdapter == nil || !report.BusinessAllowed(capability) {
 		s.fail(c, http.StatusServiceUnavailable, "unavailable", "Client 只读能力不可用")
 		return false
@@ -239,8 +227,8 @@ func (s *Server) getClient(c *gin.Context) {
 func (s *Server) failHydraRead(c *gin.Context, err *hydra.ReadError) {
 	message := "Hydra 只读请求失败"
 	switch err.Code {
-	case "unsupported_version":
-		message = "Hydra 运行版本不受支持"
+	case "embedded_spec_invalid":
+		message = "内置 Hydra 规范校验失败"
 	case "hydra_timeout":
 		message = "Hydra 请求超时"
 	case "hydra_conflict":

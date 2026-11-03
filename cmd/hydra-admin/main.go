@@ -72,7 +72,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if err := enc.Encode(output); err != nil {
 			return 1
 		}
-		if report.Status != "supported" || report.HealthProbe != hydra.ProbeOK || report.ClientListProbe != hydra.ProbeOK {
+		if report.Status != "available" || report.HealthProbe != hydra.ProbeOK || report.ClientListProbe != hydra.ProbeOK {
 			return 1
 		}
 		return 0

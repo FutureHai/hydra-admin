@@ -99,10 +99,10 @@ func TestCollectionAndAuditAuthenticatedReadOnly(t *testing.T) {
 		}
 	}
 	version = "v26.2.1"
-	if got := request(t, s, "GET", "/api/v1/scopes", "", cookies, nil); got.Code != 409 {
-		t.Fatal("runtime version drift did not close aggregation")
+	if got := request(t, s, "GET", "/api/v1/scopes", "", cookies, nil); got.Code != 200 {
+		t.Fatal("runtime version change blocked aggregation")
 	}
 	if got := request(t, s, "GET", "/api/v1/audit", "", cookies, nil); got.Code != 200 {
-		t.Fatal("Hydra mismatch incorrectly closed local audit")
+		t.Fatal("Hydra runtime version change incorrectly closed local audit")
 	}
 }

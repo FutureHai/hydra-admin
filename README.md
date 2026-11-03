@@ -1,6 +1,6 @@
 # Hydra Admin Console
 
-Go + React 管理台，用于管理受支持的 ORY Hydra Client，并查看 Scope、Audience、Token 和审计信息。多个共用数据库、issuer 与密钥的 Hydra 副本可配置为一个逻辑部署。当前固定支持 Hydra `v26.2.0`；运行版本不匹配时会关闭 Client 和 Token 业务操作。
+Go + React 管理台，用于管理 ORY Hydra Client，并查看 Scope、Audience、Token 和审计信息。多个共用数据库、issuer 与密钥的 Hydra 副本可配置为一个逻辑部署。项目基于 Hydra `v26.2.0` 开发。
 
 ## 目录
 
@@ -21,10 +21,10 @@ Go + React 管理台，用于管理受支持的 ORY Hydra Client，并查看 Sco
 可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。审计查询每批最多扫描 8 MiB，可通过游标继续查找更早记录；归档仍受 `max_archives` 保留数量限制。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
 
 - Client 列表使用 Hydra 游标分页，每页 10 条；Scope / Audience 每次读取最多 100 个 Client，可逐批继续读取并聚合，直到 Hydra 返回末页。读取期间 Client 变化可能影响结果。
-- 可在 Client 详情编辑高级授权/登出设置，并独立调整 Token 有效期；替换整个 Client 的 PUT 和 Secret 轮换关闭。Token 操作按版本探测及配置显示。
-- Hydra 版本不匹配时，Client / Token 操作关闭；登录、状态、诊断和本地审计仍可用。详见 [支持版本与能力](SUPPORTED_HYDRA_VERSIONS.md)。
+- 可在 Client 详情编辑高级授权/登出设置，并独立调整 Token 有效期；替换整个 Client 的 PUT 和 Secret 轮换关闭。Token 操作按能力探测及配置显示。
+- 状态页展示 Hydra 运行版本和当前可用能力；部署前应在目标环境验证所需操作。详见 [开发基准与能力](SUPPORTED_HYDRA_VERSIONS.md)。
 
-多副本探测只验证版本、健康与 Client 列表可读，无法证明各副本使用同一数据库、issuer 和签名密钥。配置前需在 Hydra 部署侧核对这些值；若不一致，只配置一个副本。当前管理台的登录会话、限流和同一 Client 写入锁均在单进程内，多个 `hydra-admin` 进程不能作为一个共享会话集群直接部署。
+多副本探测读取版本信息，并验证健康与 Client 列表可读；无法证明各副本使用同一数据库、issuer 和签名密钥。配置前需在 Hydra 部署侧核对这些值；若不一致，只配置一个副本。当前管理台的登录会话、限流和同一 Client 写入锁均在单进程内，多个 `hydra-admin` 进程不能作为一个共享会话集群直接部署。
 
 ## 快速开始
 
@@ -38,7 +38,7 @@ Go + React 管理台，用于管理受支持的 ORY Hydra Client，并查看 Sco
 
 ## 界面预览
 
-以下截图使用本地测试数据；实际可用操作以连接的 Hydra 版本和能力检测结果为准。点击图片可查看原图。
+以下截图使用本地测试数据；实际可用操作以能力检测结果为准。点击图片可查看原图。
 
 | 管理员登录 | 控制台概览 | Client 列表 | 创建 Client |
 | :---: | :---: | :---: | :---: |
@@ -390,13 +390,13 @@ git push origin master vX.Y.Z
 | ARM64 包 | 构建并打包；目标设备运行仍需验收。 |
 | 浏览器 | 自动化覆盖 Chromium；尚未声明其他浏览器及最低版本。 |
 
-本仓库保留构建运行必需的固定 OpenAPI、来源与许可证材料，以及 [支持版本说明](SUPPORTED_HYDRA_VERSIONS.md)。固定规范的来源、摘要和许可证信息见本仓库的 [SOURCE.md](specs/v26.2.0/SOURCE.md)。
+本仓库保留构建运行必需的开发基准 OpenAPI、来源与许可证材料，以及 [开发基准与能力说明](SUPPORTED_HYDRA_VERSIONS.md)。规范的来源、摘要和许可证信息见本仓库的 [SOURCE.md](specs/v26.2.0/SOURCE.md)。
 
 ## 排错
 
 | 现象 | 检查方向 |
 | --- | --- |
-| Client / Token 操作关闭 | 在状态页或 `check` 报告检查 Hydra 版本、健康和 Client 列表探测；仅精确匹配受支持版本才开放对应能力。 |
+| Client / Token 操作关闭 | 在状态页或 `check` 报告检查健康状态、Client 列表探测、内置规范校验及相应能力的禁用原因。 |
 | `web assets are absent` | 当前二进制缺前端产物；运行 `make web-install && make build`，或改用包含网页的 Release 压缩包。 |
 | `hash-password requires an interactive TTY` | 在本机交互终端运行；它不接受管道或 CI 标准输入。 |
 | `local file check failed` | 检查 `audit.path`、`log.path` 所在目录的写权限，以及已有文件权限是否过宽。 |

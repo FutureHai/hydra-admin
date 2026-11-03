@@ -6,7 +6,7 @@ import { TokenPage } from './TokenPage'
 vi.mock('../clients/useHydraStatus', () => ({
   useHydraStatus: () => ({
     status: { capabilities: {
-      token_introspect: { enabled: false, reason: 'unsupported_version' },
+      token_introspect: { enabled: false, reason: 'health_not_ready' },
       token_revoke: { enabled: false, reason: 'public_revoke_not_configured' },
     } },
     error: null,

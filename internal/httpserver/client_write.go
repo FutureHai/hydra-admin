@@ -85,13 +85,6 @@ func decodeWrite(c *gin.Context, target any) error {
 
 func (s *Server) clientWriter(c *gin.Context, capability string) (hydra.ClientWriteAdapter, bool) {
 	report := s.currentHydraReport(c.Request.Context())
-	if report.Status == "unsupported_version" {
-		if !s.auditRejectedClientWrite(c) {
-			return nil, false
-		}
-		s.fail(c, 409, "unsupported_version", "Hydra 运行版本不受支持")
-		return nil, false
-	}
 	writer, ok := s.HydraAdapter.(hydra.ClientWriteAdapter)
 	if !ok || !report.BusinessAllowed(capability) {
 		if !s.auditRejectedClientWrite(c) {
@@ -288,8 +281,8 @@ func (s *Server) deleteClient(c *gin.Context) {
 func (s *Server) failHydraWrite(c *gin.Context, err *hydra.ReadError) {
 	message := "Hydra 写入失败；请按 Client ID 核验状态后再决定下一步"
 	switch err.Code {
-	case "unsupported_version":
-		message = "Hydra 运行版本不受支持"
+	case "embedded_spec_invalid":
+		message = "内置 Hydra 规范校验失败"
 	case "client_changed":
 		message = "Client 已变化，请刷新后重新检查修改内容"
 	case "client_not_found":

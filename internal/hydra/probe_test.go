@@ -20,8 +20,8 @@ func TestPinnedSpecAndVersionFixtures(t *testing.T) {
 		name, fixture, wantStatus string
 		wantList                  bool
 	}{
-		{"match", "version_match.json", "supported", true},
-		{"mismatch", "version_mismatch.json", "unsupported_version", false},
+		{"match", "version_match.json", "available", true},
+		{"mismatch", "version_mismatch.json", "available", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			version, err := os.ReadFile("testdata/" + tt.fixture)
@@ -55,7 +55,7 @@ func TestPinnedSpecAndVersionFixtures(t *testing.T) {
 				t.Fatal(err)
 			}
 			report := Probe(context.Background(), adapter, registry)
-			if report.Status != tt.wantStatus || (listCalls == 1) != tt.wantList {
+			if report.Status != tt.wantStatus || (listCalls == 1) != tt.wantList || report.DevelopmentBaseline != Version26 {
 				t.Fatalf("report=%+v listCalls=%d", report, listCalls)
 			}
 			for _, name := range businessNames {
@@ -78,13 +78,17 @@ func TestPinnedSpecAndVersionFixtures(t *testing.T) {
 	}
 }
 
-func TestDeniedAndTransportRestrictions(t *testing.T) {
+func TestVersionProbeDeniedDoesNotDisableBusiness(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/version" {
 			http.Error(w, "secret upstream body", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/admin/clients" {
+			w.Write([]byte(`[]`))
+			return
+		}
 		w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer server.Close()
@@ -94,7 +98,7 @@ func TestDeniedAndTransportRestrictions(t *testing.T) {
 	}
 	report := Probe(context.Background(), adapter, NewRegistry())
 	data, _ := json.Marshal(report)
-	if report.Status != string(ProbeDenied) || !strings.Contains(report.Diagnostic, "额外认证") || strings.Contains(string(data), "secret upstream body") {
+	if report.Status != "available" || report.VersionProbe != ProbeDenied || report.ObservedVersion != "" || !report.BusinessAllowed("client_list") || strings.Contains(string(data), "secret upstream body") {
 		t.Fatalf("denied report: %s", data)
 	}
 	for _, address := range []string{
@@ -111,6 +115,32 @@ func TestDeniedAndTransportRestrictions(t *testing.T) {
 		if err := adapter.ConfigurePublicRevoke(address); err == nil {
 			t.Fatalf("plaintext Public URL %q accepted", address)
 		}
+	}
+}
+
+func TestVersionProbeTimeoutDoesNotConsumeBusinessProbes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/version" {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/admin/clients" {
+			w.Write([]byte(`[]`))
+			return
+		}
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+	adapter, err := NewHTTPAdapter(server.URL, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	report := Probe(ctx, adapter, NewRegistry())
+	if report.VersionProbe != ProbeUnavailable || report.HealthProbe != ProbeOK || report.ClientListProbe != ProbeOK || !report.BusinessAllowed("client_list") {
+		t.Fatalf("informational version timeout blocked business: %+v", report)
 	}
 }
 

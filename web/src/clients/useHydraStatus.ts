@@ -4,7 +4,7 @@ import { api } from '../auth/api'
 export type HydraStatus = {
   status: string
   observed_version?: string
-  supported_version: string
+  development_baseline: string
   spec_sha256: string
   version_probe: string
   health_probe: string

@@ -287,10 +287,10 @@ func TestLoginThroughPrivateIPDirect(t *testing.T) {
 	}
 }
 
-func TestUnsupportedVersionKeepsLoginAndStatusButClosesBusiness(t *testing.T) {
+func TestUnavailableCapabilitiesKeepLoginAndStatus(t *testing.T) {
 	s, _ := testServer(t)
-	s.HydraReport = hydra.Report{Status: "unsupported_version", SupportedVersion: hydra.Version26, SpecSHA256: hydra.SpecSHA26,
-		Capabilities: map[string]hydra.Capability{"client_list": {Reason: "unsupported_version"}, "token_revoke": {Reason: "unsupported_version"}}}
+	s.HydraReport = hydra.Report{Status: "unavailable", DevelopmentBaseline: hydra.Version26, SpecSHA256: hydra.SpecSHA26,
+		Capabilities: map[string]hydra.Capability{"client_list": {Reason: "health_not_ready"}, "token_revoke": {Reason: "health_not_ready"}}}
 	if got := request(t, s, "GET", "/api/v1/system/status", "", nil, nil); got.Code != 401 {
 		t.Fatal("anonymous status access accepted")
 	}
@@ -310,19 +310,19 @@ func TestUnsupportedVersionKeepsLoginAndStatusButClosesBusiness(t *testing.T) {
 		t.Fatal("session cookie missing")
 	}
 	status := request(t, s, "GET", "/api/v1/system/status", "", []*http.Cookie{session}, nil)
-	if status.Code != 200 || !strings.Contains(status.Body.String(), `"status":"unsupported_version"`) {
+	if status.Code != 200 || !strings.Contains(status.Body.String(), `"status":"unavailable"`) {
 		t.Fatalf("status: %d %s", status.Code, status.Body.String())
 	}
 	for _, target := range []string{"/api/v1/clients", "/api/v1/clients/example", "/api/v1/tokens/introspect", "/api/v1/tokens/revoke", "/api/v1/scopes", "/api/v1/audiences"} {
 		got := request(t, s, "GET", target, "", []*http.Cookie{session}, nil)
-		if got.Code != 409 || !strings.Contains(got.Body.String(), `"code":"unsupported_version"`) {
+		if got.Code != 503 || !strings.Contains(got.Body.String(), `"code":"unavailable"`) {
 			t.Fatalf("business route %s: %d %s", target, got.Code, got.Body.String())
 		}
 	}
 	sessionCSRF, _ := csrf(t, s, []*http.Cookie{session})
 	write := request(t, s, "POST", "/api/v1/tokens/introspect", "", []*http.Cookie{session},
 		map[string]string{"Origin": "http://127.0.0.1:8085", "X-CSRF-Token": sessionCSRF})
-	if write.Code != 409 || !strings.Contains(write.Body.String(), `"code":"unsupported_version"`) {
+	if write.Code != 503 || !strings.Contains(write.Body.String(), `"code":"unavailable"`) {
 		t.Fatalf("business write not closed: %d %s", write.Code, write.Body.String())
 	}
 }
@@ -341,21 +341,24 @@ func TestClusterStatusAndClientGateUseLiveReplicaReport(t *testing.T) {
 		}
 	}))
 	defer good.Close()
-	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	differentVersion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/version" {
+		switch r.URL.Path {
+		case "/version":
 			w.Write([]byte(`{"version":"v26.2.1"}`))
-			return
+		case "/health/ready":
+			w.Write([]byte(`{"status":"ok"}`))
+		case "/admin/clients":
+			w.Write([]byte(`[]`))
 		}
-		w.Write([]byte(`{"status":"ok"}`))
 	}))
-	defer bad.Close()
-	cluster, err := hydra.NewClusterAdapter([]hydra.AdminReplica{{Name: "good", URL: good.URL}, {Name: "bad", URL: bad.URL}}, time.Second)
+	defer differentVersion.Close()
+	cluster, err := hydra.NewClusterAdapter([]hydra.AdminReplica{{Name: "good", URL: good.URL}, {Name: "different-version", URL: differentVersion.URL}}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.HydraAdapter = cluster
-	s.HydraReport = hydra.Report{Status: "unsupported_version"}
+	s.HydraReport = hydra.Report{Status: "unavailable"}
 	if !cluster.Report(context.Background()).BusinessAllowed("client_list") {
 		t.Fatal("healthy replica was not enabled")
 	}
@@ -367,12 +370,14 @@ func TestClusterStatusAndClientGateUseLiveReplicaReport(t *testing.T) {
 	}
 	cookies := login.Result().Cookies()
 	status := request(t, s, "GET", "/api/v1/system/status", "", cookies, nil)
-	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"name":"bad"`) || !strings.Contains(status.Body.String(), `"eligible":false`) || strings.Contains(status.Body.String(), good.URL) {
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"name":"different-version"`) || !strings.Contains(status.Body.String(), `"observed_version":"v26.2.1"`) || strings.Contains(status.Body.String(), `"eligible":false`) || strings.Contains(status.Body.String(), good.URL) {
 		t.Fatalf("cluster status invalid: %d %s", status.Code, status.Body.String())
 	}
-	list := request(t, s, "GET", "/api/v1/clients", "", cookies, nil)
-	if list.Code != http.StatusOK {
-		t.Fatalf("live cluster gate rejected Client list: %d %s", list.Code, list.Body.String())
+	for range 2 {
+		list := request(t, s, "GET", "/api/v1/clients", "", cookies, nil)
+		if list.Code != http.StatusOK {
+			t.Fatalf("live cluster gate rejected Client list: %d %s", list.Code, list.Body.String())
+		}
 	}
 }
 

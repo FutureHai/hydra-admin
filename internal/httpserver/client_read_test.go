@@ -108,9 +108,9 @@ func TestClientReadThroughAuthenticatedAPI(t *testing.T) {
 		t.Fatalf("missing field fabricated: %d %s", missing.Code, missing.Body.String())
 	}
 	upstreamVersion = "v26.2.1"
-	unsupported := request(t, s, "GET", "/api/v1/clients", "", cookies, nil)
-	if unsupported.Code != 409 || !strings.Contains(unsupported.Body.String(), `"code":"unsupported_version"`) {
-		t.Fatalf("runtime mismatch: %d %s", unsupported.Code, unsupported.Body.String())
+	withDifferentVersion := request(t, s, "GET", "/api/v1/clients", "", cookies, nil)
+	if withDifferentVersion.Code != 200 || !strings.Contains(withDifferentVersion.Body.String(), `"fixture-sparse"`) {
+		t.Fatalf("runtime version change blocked Client list: %d %s", withDifferentVersion.Code, withDifferentVersion.Body.String())
 	}
 }
 

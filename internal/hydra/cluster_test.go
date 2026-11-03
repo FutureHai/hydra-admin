@@ -42,7 +42,7 @@ func clusterFixture(t *testing.T, version string, ready bool, writes *atomic.Int
 	}))
 }
 
-func TestClusterRoutesOnlyToHealthyCompatibleReplica(t *testing.T) {
+func TestClusterRoutesToHealthyReplicasRegardlessOfVersion(t *testing.T) {
 	var badWrites, goodWrites atomic.Int32
 	bad := clusterFixture(t, "v26.2.1", true, &badWrites)
 	defer bad.Close()
@@ -53,15 +53,20 @@ func TestClusterRoutesOnlyToHealthyCompatibleReplica(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := cluster.Report(context.Background())
-	if !report.BusinessAllowed("client_delete") || len(report.Replicas) != 2 || report.Replicas[0].Eligible || !report.Replicas[1].Eligible || report.Replicas[0].ObservedVersion != "v26.2.1" {
+	if !report.BusinessAllowed("client_delete") || len(report.Replicas) != 2 || !report.Replicas[0].Eligible || !report.Replicas[1].Eligible || report.Replicas[0].ObservedVersion != "v26.2.1" {
 		t.Fatalf("wrong cluster report: %+v", report)
 	}
 	encoded, _ := json.Marshal(report)
 	if strings.Contains(string(encoded), bad.URL) || strings.Contains(string(encoded), good.URL) {
 		t.Fatal("cluster report leaked Admin URLs")
 	}
-	if err := cluster.DeleteClient(context.Background(), "test-client"); err != nil || badWrites.Load() != 0 || goodWrites.Load() != 1 {
-		t.Fatalf("write not isolated to compatible replica: %v %d %d", err, badWrites.Load(), goodWrites.Load())
+	for range 2 {
+		if err := cluster.DeleteClient(context.Background(), "test-client"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if badWrites.Load() != 1 || goodWrites.Load() != 1 {
+		t.Fatalf("writes were not distributed across healthy replicas: %d %d", badWrites.Load(), goodWrites.Load())
 	}
 }
 

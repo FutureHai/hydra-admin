@@ -65,7 +65,7 @@ func TestCheckReadOnlyCapabilityReport(t *testing.T) {
 	if code := run([]string{"check", "--config", path}, &out, &errOut); code != 0 {
 		t.Fatalf("check exit %d: %s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), `"status": "supported"`) || !strings.Contains(out.String(), `"client_list_probe": "ok"`) || strings.Contains(out.String(), "do-not-leak") {
+	if !strings.Contains(out.String(), `"status": "available"`) || !strings.Contains(out.String(), `"client_list_probe": "ok"`) || strings.Contains(out.String(), "do-not-leak") {
 		t.Fatalf("unexpected report: %s", out.String())
 	}
 	if listCalls != 1 {
@@ -74,8 +74,8 @@ func TestCheckReadOnlyCapabilityReport(t *testing.T) {
 	upstreamVersion = "v26.2.1"
 	out.Reset()
 	errOut.Reset()
-	if code := run([]string{"check", "--config", path}, &out, &errOut); code != 1 || !strings.Contains(out.String(), `"status": "unsupported_version"`) || listCalls != 1 {
-		t.Fatalf("mismatched check: exit=%d output=%s listCalls=%d", code, out.String(), listCalls)
+	if code := run([]string{"check", "--config", path}, &out, &errOut); code != 0 || !strings.Contains(out.String(), `"status": "available"`) || !strings.Contains(out.String(), `"observed_version": "v26.2.1"`) || listCalls != 2 {
+		t.Fatalf("different runtime version check: exit=%d output=%s listCalls=%d", code, out.String(), listCalls)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "logs", "audit.jsonl")); !os.IsNotExist(err) {
 		t.Fatal("check should not create log file")

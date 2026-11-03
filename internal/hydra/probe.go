@@ -8,11 +8,12 @@ var businessNames = []string{
 	"scopes", "audiences",
 }
 
-// Probe performs only three fixed GET requests; Client list is skipped unless
-// the observed version exactly matches the pinned, verified adapter.
-func Probe(ctx context.Context, adapter HydraAdapter, registry Registry) Report {
-	r := Report{
-		Status: "unsupported_version", SupportedVersion: Version26, SpecSHA256: SpecSHA26,
+// Probe uses at most three fixed GET requests. The observed version is
+// informational; business capabilities depend on the verified local contract
+// and the upstream health and Client list probes.
+func Probe(ctx context.Context, adapter HydraAdapter, registry Registry) (r Report) {
+	r = Report{
+		Status: "unavailable", DevelopmentBaseline: Version26, SpecSHA256: SpecSHA26,
 		SpecValid: registry.SpecValid(), VersionProbe: ProbeUnavailable,
 		HealthProbe: ProbeUnavailable, ClientListProbe: ProbeUnavailable,
 		WriteAcceptance: "not_verified_in_this_deployment",
@@ -21,31 +22,27 @@ func Probe(ctx context.Context, adapter HydraAdapter, registry Registry) Report 
 	// Local audit reading is independent of Hydra's version and health.
 	r.Capabilities["audit_read"] = Capability{Enabled: true}
 	for _, name := range businessNames {
-		r.Capabilities[name] = Capability{Reason: "unsupported_version"}
+		r.Capabilities[name] = Capability{Reason: "unavailable"}
 	}
-	version, versionResult := adapter.Version(ctx)
-	r.VersionProbe = versionResult
+	// Collect the informational version last so a slow /version endpoint cannot
+	// consume the probe deadline before readiness and Client list are checked.
+	defer func() {
+		version, result := adapter.Version(ctx)
+		r.VersionProbe = result
+		// Avoid reflecting arbitrary upstream content into diagnostics.
+		if result == ProbeOK && len(version) <= 64 && safeVersion(version) {
+			r.ObservedVersion = version
+		}
+	}()
 	r.HealthProbe = adapter.Ready(ctx)
 	if r.HealthProbe == ProbeDenied {
 		r.Diagnostic = "上游拒绝访问；可能要求额外认证，本期不支持"
 	}
-	if versionResult != ProbeOK {
-		r.Status = string(versionResult)
-		if versionResult == ProbeDenied {
-			r.Diagnostic = "上游拒绝访问；可能要求额外认证，本期不支持"
-		}
-		setReasons(&r, r.Status)
+	if !r.SpecValid || adapter.Tag() != Version26 || adapter.SpecSHA256() != SpecSHA26 {
+		r.Diagnostic = "内置 Hydra 规范校验失败"
+		setReasons(&r, "embedded_spec_invalid")
 		return r
 	}
-	// Avoid reflecting arbitrary upstream content into diagnostics.
-	if len(version) <= 64 && safeVersion(version) {
-		r.ObservedVersion = version
-	}
-	if !registry.Match(version) || adapter.Tag() != version || adapter.SpecSHA256() != SpecSHA26 {
-		r.Diagnostic = "运行版本与内置规范不匹配；Client/Token 操作已关闭"
-		return r
-	}
-	r.Status = "supported"
 	if r.HealthProbe != ProbeOK {
 		if r.Diagnostic == "" {
 			r.Diagnostic = "Hydra 健康检查未就绪"
@@ -53,6 +50,7 @@ func Probe(ctx context.Context, adapter HydraAdapter, registry Registry) Report 
 		setReasons(&r, "health_not_ready")
 		return r
 	}
+	r.Status = "available"
 	r.ClientListProbe = adapter.ClientListProbe(ctx)
 	if r.ClientListProbe == ProbeDenied {
 		r.Diagnostic = "上游拒绝访问；可能要求额外认证，本期不支持"

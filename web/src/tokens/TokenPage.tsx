@@ -13,7 +13,7 @@ const visibleTokenFields = ['active', 'client_id', 'sub', 'scope', 'aud', 'exp',
 function tokenError(error: unknown): string {
   const code = axios.isAxiosError(error) ? (error.response?.data as { code?: unknown } | undefined)?.code : undefined
   switch (code) {
-    case 'unsupported_version': return 'Hydra 运行版本不受支持。'
+    case 'embedded_spec_invalid': return '内置 Hydra 规范校验失败。'
     case 'unavailable': case 'revoke_not_configured': return '当前环境未开放此 Token 能力。'
     case 'token_owner_unconfirmed': return 'Token 未激活或无法确认属于所填 Client；没有发送撤销请求。'
     case 'client_auth_method_unsupported': return '该 Client 不使用 client_secret_basic，当前适配器无法为它执行撤销。'
@@ -26,11 +26,11 @@ function tokenError(error: unknown): string {
 
 function disabledReason(reason?: string): string {
   switch (reason) {
-    case 'unsupported_version': return '运行版本与固定规范不匹配，Token 操作已关闭。'
+    case 'embedded_spec_invalid': return '内置 Hydra 规范校验失败，Token 操作不可用。'
     case 'public_revoke_not_configured': return '未启用 Public revoke 或未配置 Public URL。'
     case 'client_list_probe_failed': return 'Admin Client 只读探测未通过。'
     case 'health_not_ready': return 'Hydra 健康检查未就绪。'
-    default: return '当前版本或部署未通过此能力的适配检查。'
+    default: return '当前部署未通过此能力的探测或配置检查。'
   }
 }
 

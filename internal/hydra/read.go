@@ -49,9 +49,6 @@ func (a *HTTPAdapter) ListClientPage(ctx context.Context, pageSize int, pageToke
 	if pageSize < 1 || pageSize > 1000 || !validPageToken(pageToken) {
 		return ClientPage{}, readFailure(400, "invalid_page_token")
 	}
-	if err := a.ensureCompatible(ctx); err != nil {
-		return ClientPage{}, err
-	}
 	result, err := a.readJSON(ctx, readClientList, pageToken, pageSize)
 	if err != nil {
 		return ClientPage{}, err
@@ -144,9 +141,6 @@ func (a *HTTPAdapter) GetClient(ctx context.Context, id string) (ClientRead, *Re
 	if !validClientID(id) {
 		return ClientRead{}, readFailure(400, "invalid_client_id")
 	}
-	if err := a.ensureCompatible(ctx); err != nil {
-		return ClientRead{}, err
-	}
 	result, err := a.readJSON(ctx, readClientDetail, id, 0)
 	if err != nil {
 		return ClientRead{}, err
@@ -160,23 +154,6 @@ func (a *HTTPAdapter) GetClient(ctx context.Context, id string) (ClientRead, *Re
 		return ClientRead{}, upstreamFailure(502, "hydra_bad_response", 200)
 	}
 	return client, nil
-}
-
-func (a *HTTPAdapter) ensureCompatible(ctx context.Context) *ReadError {
-	result, err := a.readJSON(ctx, readVersion, "", 0)
-	if err != nil {
-		return err
-	}
-	var value struct {
-		Version string `json:"version"`
-	}
-	if json.Unmarshal(result.data, &value) != nil || !safeVersion(value.Version) {
-		return upstreamFailure(502, "hydra_bad_response", 200)
-	}
-	if !NewRegistry().Match(value.Version) || a.Tag() != value.Version || a.SpecSHA256() != SpecSHA26 {
-		return upstreamFailure(409, "unsupported_version", 200)
-	}
-	return nil
 }
 
 func validClientID(id string) bool {

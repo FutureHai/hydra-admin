@@ -70,8 +70,8 @@ func TestTokenWhitelistOwnershipAndPublicGate(t *testing.T) {
 		t.Fatal("unsupported Client auth method reached Public API")
 	}
 	version = "v26.2.1"
-	if _, err := a.IntrospectToken(ctx, token); err == nil || err.Code != "unsupported_version" || introCalls != 4 {
-		t.Fatal("mismatched version reached introspection")
+	if _, err := a.IntrospectToken(ctx, token); err != nil || introCalls != 5 {
+		t.Fatal("runtime version change blocked introspection")
 	}
 }
 

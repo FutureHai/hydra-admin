@@ -25,6 +25,6 @@ go test ./internal/hydra -run '^TestLiveHydra' -count=1 -v
 ## 提交改动
 
 - 描述问题、行为变化及验证方法；涉及界面时可附截图。
-- 涉及 Hydra API 时，以仓库固定规范和适配器白名单为依据，补充对应版本的测试。不要用写请求探测能力，不要默认支持未知版本。
+- 涉及 Hydra API 时，以仓库内 v26.2.0 开发基准规范和适配器白名单为依据，补充目标环境的测试。能力探测只使用已审阅的只读请求。
 - 保持认证、CSRF、能力门控和审计边界。不要提交真实密码哈希、Token、Client Secret、生产地址、日志或审计文件。
-- 修改用户可见行为时同步更新 README、[支持版本说明](SUPPORTED_HYDRA_VERSIONS.md) 或[变更记录](CHANGELOG.md)。
+- 修改用户可见行为时同步更新 README、[开发基准与能力说明](SUPPORTED_HYDRA_VERSIONS.md) 或[变更记录](CHANGELOG.md)。

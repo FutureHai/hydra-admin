@@ -181,7 +181,7 @@ func (a *HTTPAdapter) get(ctx context.Context, endpoint, query string) ([]byte, 
 // upstream path; the selected operation fixes both before any network I/O.
 func (a *HTTPAdapter) readJSON(ctx context.Context, operation readOperation, id string, pageSize int) (readResult, *ReadError) {
 	if !NewRegistry().SpecValid() {
-		return readResult{}, readFailure(409, "unsupported_version")
+		return readResult{}, readFailure(503, "embedded_spec_invalid")
 	}
 	u := *a.base
 	prefix := strings.TrimRight(a.base.Path, "/")
@@ -254,7 +254,7 @@ func (a *HTTPAdapter) readJSON(ctx context.Context, operation readOperation, id 
 // The HTTP client has no retry transport and redirects are never followed.
 func (a *HTTPAdapter) writeJSON(ctx context.Context, method, id string, body []byte, success int) ([]byte, *ReadError) {
 	if !NewRegistry().SpecValid() {
-		return nil, readFailure(409, "unsupported_version")
+		return nil, readFailure(503, "embedded_spec_invalid")
 	}
 	if method == http.MethodPost {
 		if id != "" || success != http.StatusCreated || len(body) == 0 {
@@ -282,7 +282,7 @@ func (a *HTTPAdapter) writeJSON(ctx context.Context, method, id string, body []b
 
 func (a *HTTPAdapter) writeLifespansJSON(ctx context.Context, id string, body []byte) ([]byte, *ReadError) {
 	if !NewRegistry().LifespanWriteValid() {
-		return nil, readFailure(409, "unsupported_version")
+		return nil, readFailure(503, "embedded_spec_invalid")
 	}
 	if !validClientID(id) || len(body) == 0 {
 		return nil, readFailure(400, "bad_request")
