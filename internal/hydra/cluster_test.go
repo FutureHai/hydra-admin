@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -201,5 +202,91 @@ func TestStaleStatusCannotSendWriteToFailedReplica(t *testing.T) {
 	}
 	if cluster.Report(context.Background()).BusinessAllowed("client_list") {
 		t.Fatal("background probe did not refresh failed replica")
+	}
+}
+
+func TestClusterSerializesWritesToSameClientBeforeRevisionCheck(t *testing.T) {
+	var mu sync.Mutex
+	name := "before"
+	var detailReads atomic.Int32
+	firstPatchStarted := make(chan struct{})
+	releaseFirstPatch := make(chan struct{})
+	var patchCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/version":
+			_, _ = w.Write([]byte(`{"version":"v26.2.0"}`))
+		case "/health/ready":
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/admin/clients":
+			_, _ = w.Write([]byte(`[]`))
+		case "/admin/clients/shared":
+			if r.Method == http.MethodGet {
+				detailReads.Add(1)
+				mu.Lock()
+				current := name
+				mu.Unlock()
+				_ = json.NewEncoder(w).Encode(map[string]string{"client_id": "shared", "client_name": current})
+				return
+			}
+			if r.Method != http.MethodPatch {
+				t.Errorf("unexpected method %s", r.Method)
+				return
+			}
+			var patch []struct {
+				Value string `json:"value"`
+			}
+			if json.NewDecoder(r.Body).Decode(&patch) != nil || len(patch) != 1 {
+				t.Error("invalid patch")
+				return
+			}
+			if patchCount.Add(1) == 1 {
+				close(firstPatchStarted)
+				<-releaseFirstPatch
+			}
+			mu.Lock()
+			name = patch[0].Value
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]string{"client_id": "shared", "client_name": patch[0].Value})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	cluster, err := NewClusterAdapter([]AdminReplica{{Name: "one", URL: server.URL}}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := (ClientRead{Fields: map[string]json.RawMessage{"client_id": json.RawMessage(`"shared"`), "client_name": json.RawMessage(`"before"`)}}).Revision()
+	results := make(chan *ReadError, 2)
+	go func() {
+		_, writeErr := cluster.PatchClient(context.Background(), "shared", baseline, map[string]json.RawMessage{"client_name": json.RawMessage(`"first"`)})
+		results <- writeErr
+	}()
+	select {
+	case <-firstPatchStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first patch did not start")
+	}
+	go func() {
+		_, writeErr := cluster.PatchClient(context.Background(), "shared", baseline, map[string]json.RawMessage{"client_name": json.RawMessage(`"second"`)})
+		results <- writeErr
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if got := detailReads.Load(); got != 1 {
+		close(releaseFirstPatch)
+		t.Fatalf("second write read a stale Client before first write completed: %d reads", got)
+	}
+	close(releaseFirstPatch)
+	first, second := <-results, <-results
+	conflicts := 0
+	for _, result := range []*ReadError{first, second} {
+		if result != nil && result.Code == "client_changed" {
+			conflicts++
+		}
+	}
+	if conflicts != 1 || (first != nil && second != nil) || patchCount.Load() != 1 {
+		t.Fatalf("expected one successful write and one revision conflict, got %v, %v and %d patches", first, second, patchCount.Load())
 	}
 }

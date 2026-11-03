@@ -27,7 +27,12 @@ func TestCollectionAndAuditAuthenticatedReadOnly(t *testing.T) {
 		case "/health/ready":
 			w.Write([]byte(`{"status":"ok"}`))
 		case "/admin/clients":
-			w.Write([]byte(`[{"client_id":"a","scope":"read write","audience":["api-a"]},{"client_id":"b","scope":"read","audience":["api-a","api-b"]},{"client_id":"c"}]`))
+			if r.URL.Query().Get("page_token") == "next" {
+				w.Write([]byte(`[{"client_id":"c","scope":"admin","audience":["api-c"]}]`))
+			} else {
+				w.Header().Set("Link", `</admin/clients?page_size=100&page_token=next>; rel="next"`)
+				w.Write([]byte(`[{"client_id":"a","scope":"read write","audience":["api-a"]},{"client_id":"b","scope":"read","audience":["api-a","api-b"]}]`))
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -69,9 +74,12 @@ func TestCollectionAndAuditAuthenticatedReadOnly(t *testing.T) {
 		{"/api/v1/audiences", `"value":"api-a","client_count":2`},
 	} {
 		got := request(t, s, "GET", tc.route, "", cookies, nil)
-		if got.Code != 200 || !strings.Contains(got.Body.String(), tc.want) || !strings.Contains(got.Body.String(), `"complete":false`) || !strings.Contains(got.Body.String(), "可能不完整") {
+		if got.Code != 200 || !strings.Contains(got.Body.String(), tc.want) || !strings.Contains(got.Body.String(), `"complete":false`) || !strings.Contains(got.Body.String(), `"next_page_token":"next"`) {
 			t.Fatalf("aggregation %s: %d %s", tc.route, got.Code, got.Body.String())
 		}
+	}
+	if got := request(t, s, "GET", "/api/v1/scopes?page_token=next", "", cookies, nil); got.Code != 200 || !strings.Contains(got.Body.String(), `"value":"admin"`) || !strings.Contains(got.Body.String(), `"complete":true`) {
+		t.Fatalf("aggregation next page: %d %s", got.Code, got.Body.String())
 	}
 	if got := request(t, s, "GET", "/api/v1/scopes?path=/tmp/x", "", cookies, nil); got.Code != 400 {
 		t.Fatal("collection query accepted")
@@ -85,7 +93,7 @@ func TestCollectionAndAuditAuthenticatedReadOnly(t *testing.T) {
 	if got.Code != 200 || !strings.Contains(got.Body.String(), `"action":"client.update"`) || strings.Contains(got.Body.String(), `"action":"login"`) {
 		t.Fatalf("audit filter: %d %s", got.Code, got.Body.String())
 	}
-	for _, raw := range []string{"path=/tmp/secret", "limit=10000", "action=a&action=b", "from=bad", "from=2026-10-14T00%3A00%3A00Z&to=2026-10-13T00%3A00%3A00Z"} {
+	for _, raw := range []string{"path=/tmp/secret", "limit=10000", "action=a&action=b", "cursor=abc", "from=bad", "from=2026-10-14T00%3A00%3A00Z&to=2026-10-13T00%3A00%3A00Z"} {
 		if got := request(t, s, "GET", "/api/v1/audit?"+raw, "", cookies, nil); got.Code != 400 {
 			t.Fatalf("invalid audit query accepted: %s", raw)
 		}

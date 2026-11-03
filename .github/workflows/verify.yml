@@ -8,8 +8,23 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.release_version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve package version
+        id: release_version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version=0.0.0-ci
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -53,21 +68,28 @@ jobs:
           cd ..
           ./tests/e2e/run.sh
       - name: Build complete release
-        run: ./scripts/package-release.sh 0.1.0
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ./scripts/package-release.sh "$RELEASE_VERSION"
+          else
+            ALLOW_UNTAGGED_RELEASE=1 ./scripts/package-release.sh "$RELEASE_VERSION"
+          fi
       - name: Embedded service SIGTERM and log durability
         run: go test ./cmd/hydra-admin -run TestServeCompletesInFlightRequestOnSIGTERM -count=1 -v
       - name: Verify release targets, archives and checksums
         run: |
           python3 - <<'PY'
           import pathlib
+          import os
           import struct
           import tarfile
           import zipfile
 
           dist = pathlib.Path('dist')
+          version = os.environ['RELEASE_VERSION']
           targets = ('linux-amd64', 'linux-arm64', 'darwin-amd64', 'darwin-arm64', 'windows-amd64', 'windows-arm64')
           for target in targets:
-              name = f'hydra-admin-v0.1.0-{target}'
+              name = f'hydra-admin-v{version}-{target}'
               binary = dist / name / ('hydra-admin.exe' if target.startswith('windows-') else 'hydra-admin')
               data = binary.read_bytes()
               if target.startswith('linux-'):
@@ -97,42 +119,42 @@ jobs:
               assert (dist / f'{name}' / 'config.yaml').is_file()
               print(f'verified {target}: {binary.name}, {archive.name}')
           PY
-          for release_dir in dist/hydra-admin-v0.1.0-{linux,darwin,windows}-{amd64,arm64}; do
+          for release_dir in dist/hydra-admin-v"$RELEASE_VERSION"-{linux,darwin,windows}-{amd64,arm64}; do
             (cd "$release_dir" && sha256sum -c SHA256SUMS)
           done
-          (cd dist && sha256sum -c hydra-admin-v0.1.0-*.sha256)
-          file dist/hydra-admin-v0.1.0-linux-amd64/hydra-admin | tee /tmp/hydra-file.txt
+          (cd dist && sha256sum -c hydra-admin-v"$RELEASE_VERSION"-*.sha256)
+          file dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/hydra-admin | tee /tmp/hydra-file.txt
           grep -E 'ELF 64-bit.*x86-64.*statically linked' /tmp/hydra-file.txt
-          if ldd dist/hydra-admin-v0.1.0-linux-amd64/hydra-admin > /tmp/hydra-ldd.txt 2>&1; then
+          if ldd dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/hydra-admin > /tmp/hydra-ldd.txt 2>&1; then
             echo 'binary unexpectedly requires a dynamic loader' >&2
             exit 1
           fi
           grep -E 'not a dynamic executable|statically linked' /tmp/hydra-ldd.txt
           test -s assets/dist/index.html
-          test -s dist/hydra-admin-v0.1.0-linux-amd64/config.yaml
-          grep -F 'REPLACE_WITH_BASE64_HASH' dist/hydra-admin-v0.1.0-linux-amd64/config.yaml
-          test -s dist/hydra-admin-v0.1.0-linux-amd64/licenses/UPSTREAM_SOURCES.md
-          ! grep -F 'UPSTREAM_FILE_ABSENT' dist/hydra-admin-v0.1.0-linux-amd64/licenses/MANIFEST.tsv
+          test -s dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/config.yaml
+          grep -F 'REPLACE_WITH_BASE64_HASH' dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/config.yaml
+          test -s dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/licenses/UPSTREAM_SOURCES.md
+          ! grep -F 'UPSTREAM_FILE_ABSENT' dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/licenses/MANIFEST.tsv
       - name: Clean Ubuntu 20.04 AMD64 runtime smoke
         run: |
           docker run --rm --platform linux/amd64 \
-            -v "$PWD/dist/hydra-admin-v0.1.0-linux-amd64.tar.gz:/opt/hydra-admin-v0.1.0-linux-amd64.tar.gz:ro" \
-            -v "$PWD/dist/hydra-admin-v0.1.0-linux-amd64.tar.gz.sha256:/opt/hydra-admin-v0.1.0-linux-amd64.tar.gz.sha256:ro" \
+            -v "$PWD/dist/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz:/opt/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz:ro" \
+            -v "$PWD/dist/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz.sha256:/opt/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz.sha256:ro" \
             -v "$PWD/tests/fixtures/smoke-config.yaml:/tmp/config.yaml:ro" \
-            -w /opt ubuntu:20.04 bash -euc '
+            -e RELEASE_VERSION="$RELEASE_VERSION" -w /opt ubuntu:20.04 bash -euc '
               apt-get update -qq
               DEBIAN_FRONTEND=noninteractive apt-get install -y -qq file >/dev/null
-              sha256sum -c hydra-admin-v0.1.0-linux-amd64.tar.gz.sha256
+              sha256sum -c "hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz.sha256"
               mkdir -p /tmp/release
-              tar -xzf hydra-admin-v0.1.0-linux-amd64.tar.gz -C /tmp/release
-              cd /tmp/release/hydra-admin-v0.1.0-linux-amd64
+              tar -xzf "hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz" -C /tmp/release
+              cd "/tmp/release/hydra-admin-v${RELEASE_VERSION}-linux-amd64"
               sha256sum -c SHA256SUMS >/tmp/release-checksums.out
               file ./hydra-admin | grep -E "ELF 64-bit.*x86-64.*statically linked"
               if ldd ./hydra-admin >/tmp/ldd.txt 2>&1; then exit 1; fi
               grep -E "not a dynamic executable|statically linked" /tmp/ldd.txt
               ! command -v node
               ! command -v go
-              ./hydra-admin version | grep -F "hydra-admin 0.1.0"
+              ./hydra-admin version | grep -F "hydra-admin ${RELEASE_VERSION}"
               ./hydra-admin serve --config /tmp/config.yaml >/tmp/serve.out 2>&1 &
               pid=$!
               trap "kill -TERM $pid 2>/dev/null || true" EXIT
@@ -157,13 +179,15 @@ jobs:
         with:
           name: hydra-admin-cross-platform
           path: |
-            dist/hydra-admin-v0.1.0-*.tar.gz
-            dist/hydra-admin-v0.1.0-*.zip
-            dist/hydra-admin-v0.1.0-*.sha256
+            dist/hydra-admin-v${{ steps.release_version.outputs.version }}-*.tar.gz
+            dist/hydra-admin-v${{ steps.release_version.outputs.version }}-*.zip
+            dist/hydra-admin-v${{ steps.release_version.outputs.version }}-*.sha256
 
   macos-smoke:
     needs: verify
     runs-on: macos-latest
+    env:
+      RELEASE_VERSION: ${{ needs.verify.outputs.release_version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -176,15 +200,17 @@ jobs:
             arm64) arch=arm64 ;;
             *) echo "unsupported macOS runner architecture" >&2; exit 1 ;;
           esac
-          release="hydra-admin-v0.1.0-darwin-$arch"
+          release="hydra-admin-v${RELEASE_VERSION}-darwin-$arch"
           shasum -a 256 -c "$release.tar.gz.sha256"
           tar -xzf "$release.tar.gz"
           (cd "$release" && shasum -a 256 -c SHA256SUMS)
-          "./$release/hydra-admin" version | grep -F 'hydra-admin 0.1.0'
+          "./$release/hydra-admin" version | grep -F "hydra-admin ${RELEASE_VERSION}"
 
   windows-smoke:
     needs: verify
     runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ needs.verify.outputs.release_version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -198,7 +224,7 @@ jobs:
             'ARM64' { 'arm64' }
             default { throw "unsupported Windows runner architecture: $env:PROCESSOR_ARCHITECTURE" }
           }
-          $release = "hydra-admin-v0.1.0-windows-$arch"
+          $release = 'hydra-admin-v{0}-windows-{1}' -f $env:RELEASE_VERSION, $arch
           $archive = "$release.zip"
           $expectedArchiveHash = (Get-Content "$archive.sha256" -Raw).Trim().Split(' ')[0]
           $actualArchiveHash = (Get-FileHash $archive -Algorithm SHA256).Hash
@@ -210,5 +236,28 @@ jobs:
             $path = Join-Path $release $Matches[2]
             if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $expected) { throw "file SHA-256 mismatch: $path" }
           }
-          & "./$release/hydra-admin.exe" version | Select-String -SimpleMatch 'hydra-admin 0.1.0'
+          & "./$release/hydra-admin.exe" version | Select-String -SimpleMatch "hydra-admin $env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Windows binary failed to start' }
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [verify, macos-smoke, windows-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ needs.verify.outputs.release_version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hydra-admin-cross-platform
+      - name: Publish verified archives to GitHub Release
+        shell: bash
+        run: |
+          if [[ -d dist ]]; then cd dist; fi
+          gh release create "$GITHUB_REF_NAME" \
+            hydra-admin-v"$RELEASE_VERSION"-*.tar.gz \
+            hydra-admin-v"$RELEASE_VERSION"-*.zip \
+            hydra-admin-v"$RELEASE_VERSION"-*.sha256 \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes

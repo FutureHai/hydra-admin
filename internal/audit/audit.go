@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,14 +26,34 @@ type Event struct {
 	ChangedFields []string  `json:"changed_fields,omitempty"`
 }
 
-type Recorder struct{ writer *RotatingWriter }
+type Recorder struct {
+	writer    *RotatingWriter
+	mu        sync.Mutex
+	unhealthy atomic.Bool
+}
 
 func NewRecorder(writer *RotatingWriter) *Recorder { return &Recorder{writer: writer} }
 
 // Ready checks local durability before an operation that must be audited.
-func (r *Recorder) Ready() error { return r.writer.Sync() }
+func (r *Recorder) Ready() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unhealthy.Load() {
+		return errors.New("audit recorder requires recovery")
+	}
+	if err := r.writer.Sync(); err != nil {
+		r.unhealthy.Store(true)
+		return err
+	}
+	return nil
+}
 
 func (r *Recorder) Append(event Event) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unhealthy.Load() {
+		return errors.New("audit recorder requires recovery")
+	}
 	if event.Action == "" || event.Outcome == "" {
 		return errors.New("audit action and outcome are required")
 	}
@@ -61,9 +82,11 @@ func (r *Recorder) Append(event Event) error {
 	}
 	line = append(line, '\n')
 	if _, err := r.writer.Write(line); err != nil {
+		r.unhealthy.Store(true)
 		return fmt.Errorf("write audit event: %w", err)
 	}
 	if err := r.writer.Sync(); err != nil {
+		r.unhealthy.Store(true)
 		return fmt.Errorf("sync audit event: %w", err)
 	}
 	return nil

@@ -14,6 +14,14 @@ make vet
 
 `make test` 会运行 Go 单元测试、前端测试和类型检查。需要构建完整二进制时运行 `make build`；前端产物会嵌入程序。
 
+可在隔离的 Hydra v26.2.0 测试环境运行真实 API 集成测试；测试会创建并删除随机 Client，不要指向生产环境。需要验证 Token 与 JWT 格式时，Public API 也必须可用，且 JWT 测试要求 Hydra 的 JWKS 和签名密钥正常工作：
+
+```bash
+HYDRA_ADMIN_TEST_URL=http://127.0.0.1:4445 \
+HYDRA_PUBLIC_TEST_URL=http://127.0.0.1:4444 \
+go test ./internal/hydra -run '^TestLiveHydra' -count=1 -v
+```
+
 ## 提交改动
 
 - 描述问题、行为变化及验证方法；涉及界面时可附截图。

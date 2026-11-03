@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"hash/fnv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,8 +29,11 @@ type ClusterAdapter struct {
 	next      atomic.Uint64
 	mu        sync.RWMutex
 	refreshMu sync.Mutex
-	last      Report
-	checked   time.Time
+	// Serialize writes to the same Client across the configured Hydra replicas.
+	// This only coordinates requests handled by this console process.
+	clientWrites [256]sync.Mutex
+	last         Report
+	checked      time.Time
 }
 
 func NewClusterAdapter(endpoints []AdminReplica, timeout time.Duration) (*ClusterAdapter, error) {
@@ -201,6 +205,8 @@ func (a *ClusterAdapter) CreateClient(ctx context.Context, fields map[string]jso
 }
 
 func (a *ClusterAdapter) PatchClient(ctx context.Context, id, baseline string, changes map[string]json.RawMessage) (ClientRead, *ReadError) {
+	unlock := a.lockClientWrite(id)
+	defer unlock()
 	adapter, err := a.choose(ctx, "client_update")
 	if err != nil {
 		return ClientRead{}, err
@@ -209,6 +215,8 @@ func (a *ClusterAdapter) PatchClient(ctx context.Context, id, baseline string, c
 }
 
 func (a *ClusterAdapter) SetClientLifespans(ctx context.Context, id, baseline string, changes map[string]json.RawMessage) (ClientRead, *ReadError) {
+	unlock := a.lockClientWrite(id)
+	defer unlock()
 	adapter, err := a.choose(ctx, "client_lifespans_update")
 	if err != nil {
 		return ClientRead{}, err
@@ -217,11 +225,21 @@ func (a *ClusterAdapter) SetClientLifespans(ctx context.Context, id, baseline st
 }
 
 func (a *ClusterAdapter) DeleteClient(ctx context.Context, id string) *ReadError {
+	unlock := a.lockClientWrite(id)
+	defer unlock()
 	adapter, err := a.choose(ctx, "client_delete")
 	if err != nil {
 		return err
 	}
 	return adapter.DeleteClient(ctx, id)
+}
+
+func (a *ClusterAdapter) lockClientWrite(id string) func() {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(id))
+	mu := &a.clientWrites[hash.Sum32()%uint32(len(a.clientWrites))]
+	mu.Lock()
+	return mu.Unlock
 }
 
 func (a *ClusterAdapter) PublicRevokeConfigured() bool {

@@ -6,6 +6,14 @@ source "$root_dir/scripts/release-targets.sh"
 release_init "$@"
 
 cd "$root_dir"
+if [[ "${ALLOW_DIRTY_RELEASE:-}" != 1 ]] && [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+  echo "release build requires a clean Git worktree" >&2
+  exit 1
+fi
+if [[ "${ALLOW_UNTAGGED_RELEASE:-}" != 1 ]] && [[ "$(git tag --points-at HEAD | grep -Fx "v$release_version" || true)" != "v$release_version" ]]; then
+  echo "release build requires tag v$release_version at HEAD" >&2
+  exit 1
+fi
 "$root_dir/scripts/build-web.sh"
 test -s assets/dist/index.html || { echo "assets/dist/index.html is missing" >&2; exit 1; }
 

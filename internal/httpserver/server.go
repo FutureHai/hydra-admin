@@ -82,6 +82,7 @@ func New(cfg *config.Config, web fs.FS, recorder *audit.Recorder, logger *slog.L
 	// Request-wide middleware runs before route-specific authentication, CSRF and audit guards.
 	engine.Use(s.bodyLimit(), s.requestID(), s.recovery(), s.proxy(), s.securityHeaders(), s.accessLog(), s.rateLimit())
 	engine.GET("/healthz", s.health)
+	engine.GET("/readyz", s.ready)
 	api := engine.Group("/api/v1/auth")
 	api.GET("/csrf", s.csrf)
 	api.POST("/login", s.login)
@@ -122,6 +123,15 @@ func (s *Server) StartCleanup(ctx context.Context) <-chan struct{} {
 }
 
 func (s *Server) health(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) }
+
+func (s *Server) ready(c *gin.Context) {
+	if err := s.Audit.Ready(); err != nil {
+		s.Logger.Error("audit readiness failed", "error", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
 
 func (s *Server) currentHydraReport(ctx context.Context) hydra.Report {
 	if reporter, ok := s.HydraAdapter.(interface {

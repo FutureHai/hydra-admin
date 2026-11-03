@@ -10,4 +10,5 @@
 /hydra-admin
 /*.local.yaml
 /.DS_Store
+**/.DS_Store
 /.idea/

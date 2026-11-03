@@ -79,3 +79,23 @@ test('production CSP, login, Client CRUD, one-time Secret and audit', async ({ p
   expect(violations).toEqual([])
   expect(styleState.withNonce).toBeGreaterThan(0)
 })
+
+test('mobile viewport keeps navigation and collection pages usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/clients')
+  await page.getByLabel('用户名').fill('admin')
+  await page.getByLabel('密码').fill('test-only-password')
+  await page.getByRole('button', { name: /登\s*录/ }).click()
+  await expect(page).toHaveURL(/127\.0\.0\.1:18085\/$/)
+  const fitsViewport = async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
+  expect(await fitsViewport()).toBe(true)
+
+  const menu = page.getByRole('button', { name: '切换导航' })
+  await menu.click()
+  await expect(menu).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: 'Scope' }).click()
+  await expect(menu).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('heading', { name: 'Scope 使用情况' })).toBeVisible()
+  await expect(page.getByText('已读完')).toBeVisible()
+  expect(await fitsViewport()).toBe(true)
+})

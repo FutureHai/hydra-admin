@@ -19,6 +19,25 @@ type failingAudit struct{}
 func (failingAudit) Ready() error             { return nil }
 func (failingAudit) Append(audit.Event) error { return errors.New("simulated disk failure") }
 
+type unreadyAudit struct{}
+
+func (unreadyAudit) Ready() error             { return errors.New("simulated disk failure") }
+func (unreadyAudit) Append(audit.Event) error { return errors.New("simulated disk failure") }
+
+func TestReadinessFailsWhenAuditUnavailable(t *testing.T) {
+	s, _ := testServer(t)
+	if got := request(t, s, "GET", "/readyz", "", nil, nil); got.Code != 200 {
+		t.Fatalf("healthy readiness: %d", got.Code)
+	}
+	s.Audit = unreadyAudit{}
+	if got := request(t, s, "GET", "/readyz", "", nil, nil); got.Code != 503 || strings.Contains(got.Body.String(), "simulated") {
+		t.Fatalf("audit failure readiness: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(t, s, "GET", "/healthz", "", nil, nil); got.Code != 200 {
+		t.Fatalf("liveness changed: %d", got.Code)
+	}
+}
+
 func TestClientWriteGuardsAndPostWriteAuditFailure(t *testing.T) {
 	postCalls, deleteCalls, lifespanCalls := 0, 0, 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

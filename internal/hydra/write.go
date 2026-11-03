@@ -79,7 +79,7 @@ var WritableSchema = []WritableField{
 	{Name: "post_logout_redirect_uris", Kind: "array"},
 	{Name: "allowed_cors_origins", Kind: "array"},
 	{Name: "token_endpoint_auth_method", Kind: "select", Options: []string{"client_secret_basic", "client_secret_post", "none"}},
-	{Name: "access_token_strategy", Kind: "select", Options: []string{"opaque", "jwt"}, Help: "可选；留空沿用 Hydra 全局策略。选择 jwt 会覆盖此 Client 的 Access Token 格式，请确认下游支持。"},
+	{Name: "access_token_strategy", Kind: "select", Options: []string{"opaque", "jwt"}, Help: "可选；留空沿用 Hydra 全局策略。选择 jwt 前请确认 Hydra 的 JWKS 与签名密钥可用，且下游支持 JWT Access Token。"},
 	{Name: "owner", Kind: "text"},
 	{Name: "contacts", Kind: "array"},
 	{Name: "client_uri", Kind: "text"},

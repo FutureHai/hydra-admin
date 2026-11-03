@@ -18,11 +18,13 @@ Go + React 管理台，用于管理受支持的 ORY Hydra Client，并查看 Sco
 
 ## 功能与当前限制
 
-可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
+可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。审计查询每批最多扫描 8 MiB，可通过游标继续查找更早记录；归档仍受 `max_archives` 保留数量限制。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
 
-- Client 列表使用 Hydra 游标分页，每页 10 条；Scope / Audience 仅聚合当前可读取的前 100 个 Client，结果可能不完整。
+- Client 列表使用 Hydra 游标分页，每页 10 条；Scope / Audience 每次读取最多 100 个 Client，可逐批继续读取并聚合，直到 Hydra 返回末页。读取期间 Client 变化可能影响结果。
 - 可在 Client 详情编辑高级授权/登出设置，并独立调整 Token 有效期；替换整个 Client 的 PUT 和 Secret 轮换关闭。Token 操作按版本探测及配置显示。
 - Hydra 版本不匹配时，Client / Token 操作关闭；登录、状态、诊断和本地审计仍可用。详见 [支持版本与能力](SUPPORTED_HYDRA_VERSIONS.md)。
+
+多副本探测只验证版本、健康与 Client 列表可读，无法证明各副本使用同一数据库、issuer 和签名密钥。配置前需在 Hydra 部署侧核对这些值；若不一致，只配置一个副本。当前管理台的登录会话、限流和同一 Client 写入锁均在单进程内，多个 `hydra-admin` 进程不能作为一个共享会话集群直接部署。
 
 ## 快速开始
 
@@ -143,7 +145,7 @@ Windows 在 PowerShell 中运行 `.\hydra-admin.exe hash-password`，把哈希�
 
 常用配置：`auth.session_ttl` 控制会话有效期；`auth.login` 控制登录失败次数与锁定时长；`security.api_rate_limit` 控制读取和写入请求的每 IP 速率；`audit` / `log` 控制文件大小、保留归档数和权限。可选的 `resource_catalog` 为 Audience 设置可选 Scope。当前示例值和全部字段以 [config.example.yaml](configs/config.example.yaml) 为准。
 
-`GET /healthz` 无需登录，成功时返回 HTTP 200 和 `{"status":"ok"}`；可用于服务存活探针，它不代表 Hydra 就绪或版本受支持。Hydra 状态及禁用原因请看管理台状态页或 `check` 报告。
+`GET /healthz` 无需登录，成功时返回 HTTP 200 和 `{"status":"ok"}`；可用于服务存活探针。`GET /readyz` 无需登录，在本地审计写入可用时返回 200，审计故障后返回 503；可对其设置告警。审计故障后会停止新的受审计操作，排查日志并核对可能已在 Hydra 成功的操作后重启服务。两者均不代表 Hydra 就绪或版本受支持；Hydra 状态及禁用原因请看管理台状态页或 `check` 报告。
 
 ## 访问方式
 
@@ -371,10 +373,15 @@ cp configs/config.example.yaml config.yaml
 make web-install
 make test
 make vet
-make release VERSION=0.1.0
+git status --short  # 发布前须为空；先提交当前修改
+git tag -a vX.Y.Z -m "vX.Y.Z"
+make release VERSION=X.Y.Z
+git push origin master vX.Y.Z
 ```
 
-`make release` 默认生成 Linux、macOS、Windows 的 AMD64/ARM64 六种发布包；Linux/macOS 使用 tar.gz，Windows 使用 zip，各包含 `SHA256SUMS`，并附带包外 `.sha256`。可通过 `./scripts/package-release.sh 0.1.0 windows-amd64` 只构建指定目标。Linux 包使用 `CGO_ENABLED=0` 静态构建：CI 在 Ubuntu 20.04 AMD64 容器中检查 Linux AMD64 包无动态加载器并验证服务启动；macOS、Windows runner 验证对应原生包能运行 `version`。其他架构仍需在目标环境验收；浏览器自动化目前使用 Chromium，尚无最低浏览器版本或全部浏览器的兼容性承诺。发布包包含示例配置和许可证信息，部署前必须替换占位值并在目标环境完成验收。构建脚本、测试和 CI 留在本仓库，使独立检出仍可验证和打包。
+将 `X.Y.Z` 换成待发布版本。发布构建要求工作树干净、HEAD 存在同版本 `vX.Y.Z` tag；可通过 `./scripts/package-release.sh X.Y.Z windows-amd64` 只构建指定目标。推送 tag 后，CI 使用 tag 版本重新构建、运行检查，并在全部平台检查通过后创建 GitHub Release 和上传六种包及校验文件。普通分支和 PR 只生成 `0.0.0-ci` 验证包，不发布 Release。
+
+`make release` 默认生成 Linux、macOS、Windows 的 AMD64/ARM64 六种发布包；Linux/macOS 使用 tar.gz，Windows 使用 zip，各包含 `SHA256SUMS`，并附带包外 `.sha256`。Linux 包使用 `CGO_ENABLED=0` 静态构建：CI 在 Ubuntu 20.04 AMD64 容器中检查 Linux AMD64 包无动态加载器并验证服务启动；macOS、Windows runner 验证对应原生包能运行 `version`。其他架构仍需在目标环境验收；浏览器自动化目前使用 Chromium，尚无最低浏览器版本或全部浏览器的兼容性承诺。发布包包含示例配置和许可证信息，部署前必须替换占位值并在目标环境完成验收。构建脚本、测试和 CI 留在本仓库，使独立检出仍可验证和打包。
 
 | 平台或浏览器 | 当前验证范围 |
 | --- | --- |

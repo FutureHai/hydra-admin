@@ -112,6 +112,30 @@ func TestRotationCapsArchivesAndReportsFailure(t *testing.T) {
 	}
 }
 
+func TestAuditFailureLatchesUntilRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	w, err := NewRotatingWriter(path, 512, 2, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	r := NewRecorder(w)
+	if err := r.Append(Event{Action: "client.create", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	w.rename = func(string, string) error { return errors.New("injected rotation failure") }
+	if err := r.Append(Event{Action: "client.update", Outcome: "success", TargetID: strings.Repeat("x", 400)}); err == nil {
+		t.Fatal("audit rotation failure was swallowed")
+	}
+	w.rename = os.Rename
+	if err := r.Ready(); err == nil {
+		t.Fatal("readiness recovered without reconciliation")
+	}
+	if err := r.Append(Event{Action: "client.delete", Outcome: "success"}); err == nil {
+		t.Fatal("writes continued after audit failure")
+	}
+}
+
 func TestAppLogRotationAndRedaction(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.log")
 	w, err := NewRotatingWriter(path, 256, 2, 0600)
