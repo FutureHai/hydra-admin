@@ -35,7 +35,12 @@ func testServer(t *testing.T) (*Server, string) {
 	}
 	text := strings.Replace(string(configText), "https://<ADMIN_CONSOLE_FQDN>", "http://127.0.0.1:8085", 1)
 	text = strings.Replace(text, "cookie_secure: true", "cookie_secure: false", 1)
-	text = strings.Replace(text, "$argon2id$v=19$m=65536,t=3,p=2$REPLACE_WITH_BASE64_SALT$REPLACE_WITH_BASE64_HASH", hash, 1)
+	if err := os.Mkdir(filepath.Join(temp, "state"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, "state", "password.hash"), []byte(hash+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(temp, "config.yaml")
 	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
 		t.Fatal(err)

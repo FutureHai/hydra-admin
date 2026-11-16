@@ -21,8 +21,7 @@ hydra:
 
 auth:
   username: "admin"
-  # 支持 bcrypt 或 Argon2id PHC 编码。以下是假值，不可用于登录。
-  password_hash: "$2a$12$weA3RbmfVhAOrVdfcBgYYOt3wmKztLaM.691ZQ.p/jdMyXNq2pzMm"
+  password_hash_file: "./state/password.hash"
   session_ttl: 8h
   session_cookie_name: "hydra_admin_session"
   max_sessions: 20

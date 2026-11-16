@@ -37,8 +37,8 @@ hydra:
 
 auth:
   username: "admin"
-  # 支持 bcrypt 或 Argon2id PHC 编码。以下是假值，不可用于登录。
-  password_hash: "$argon2id$v=19$m=65536,t=3,p=2$REPLACE_WITH_BASE64_SALT$REPLACE_WITH_BASE64_HASH"
+  # 必须先创建该文件；页面修改密码后会原子更新其中的哈希。
+  password_hash_file: "./state/password.hash"
   session_ttl: 8h
   session_cookie_name: "hydra_admin_session"
   max_sessions: 20

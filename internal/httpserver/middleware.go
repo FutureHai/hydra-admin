@@ -104,6 +104,9 @@ func (s *Server) rateLimit() gin.HandlerFunc {
 			if !s.auditRejectedTokenRequest(c) {
 				return
 			}
+			if !s.auditRejectedPasswordChange(c) {
+				return
+			}
 			s.fail(c, http.StatusRequestEntityTooLarge, "body_too_large", "请求体过大")
 			return
 		}
@@ -115,6 +118,9 @@ func (s *Server) rateLimit() gin.HandlerFunc {
 					return
 				}
 				if !s.auditRejectedTokenRequest(c) {
+					return
+				}
+				if !s.auditRejectedPasswordChange(c) {
 					return
 				}
 				if c.Request.URL.Path == "/api/v1/auth/login" && !s.auditLoginFailure(c) {
@@ -139,6 +145,9 @@ func (s *Server) requireSession() gin.HandlerFunc {
 			if !s.auditRejectedTokenRequest(c) {
 				return
 			}
+			if !s.auditRejectedPasswordChange(c) {
+				return
+			}
 			s.fail(c, http.StatusUnauthorized, "unauthenticated", "请先登录")
 			return
 		}
@@ -157,6 +166,9 @@ func (s *Server) requireCSRF() gin.HandlerFunc {
 				if !s.auditRejectedTokenRequest(c) {
 					return
 				}
+				if !s.auditRejectedPasswordChange(c) {
+					return
+				}
 				s.fail(c, http.StatusForbidden, "forbidden", "请求来源校验失败")
 				return
 			}
@@ -166,6 +178,9 @@ func (s *Server) requireCSRF() gin.HandlerFunc {
 					return
 				}
 				if !s.auditRejectedTokenRequest(c) {
+					return
+				}
+				if !s.auditRejectedPasswordChange(c) {
 					return
 				}
 				s.fail(c, http.StatusForbidden, "forbidden", "CSRF 校验失败")

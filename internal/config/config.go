@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ type Config struct {
 	ResourceCatalog ResourceCatalog `yaml:"resource_catalog"`
 	Auth            struct {
 		Username          string   `yaml:"username"`
-		PasswordHash      string   `yaml:"password_hash"`
+		PasswordHashFile  string   `yaml:"password_hash_file"`
 		SessionTTL        Duration `yaml:"session_ttl"`
 		SessionCookieName string   `yaml:"session_cookie_name"`
 		MaxSessions       int      `yaml:"max_sessions"`
@@ -187,8 +188,8 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Audit.Path == configPath || cfg.Log.Path == configPath {
-		return nil, errors.New("log path must not overwrite configuration file")
+	if cfg.Audit.Path == configPath || cfg.Log.Path == configPath || cfg.Auth.PasswordHashFile == configPath {
+		return nil, errors.New("state or log path must not overwrite configuration file")
 	}
 	return &cfg, nil
 }
@@ -298,9 +299,6 @@ func (c *Config) Validate(configDir string) error {
 	if strings.TrimSpace(c.Auth.Username) == "" {
 		return errors.New("auth.username is required")
 	}
-	if err := auth.ValidatePasswordHash(c.Auth.PasswordHash); err != nil {
-		return fmt.Errorf("auth.password_hash: %w", err)
-	}
 	if c.Auth.SessionTTL <= 0 || c.Auth.MaxSessions < 1 {
 		return errors.New("auth session_ttl and max_sessions must be positive")
 	}
@@ -328,6 +326,28 @@ func (c *Config) Validate(configDir string) error {
 	if c.Audit.Path == c.Log.Path {
 		return errors.New("audit.path and log.path must differ")
 	}
+	if c.Auth.PasswordHashFile == "" {
+		c.Auth.PasswordHashFile = "./state/password.hash"
+	}
+	base, err := filepath.Abs(configDir)
+	if err != nil {
+		return err
+	}
+	passwordPath := c.Auth.PasswordHashFile
+	if !filepath.IsAbs(passwordPath) {
+		passwordPath = filepath.Join(base, passwordPath)
+		if rel, err := filepath.Rel(base, passwordPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return errors.New("auth.password_hash_file escapes config directory")
+		}
+	}
+	passwordPath, err = filepath.Abs(passwordPath)
+	if err != nil {
+		return err
+	}
+	if passwordPath == c.Audit.Path || passwordPath == c.Log.Path {
+		return errors.New("auth.password_hash_file conflicts with a log path")
+	}
+	c.Auth.PasswordHashFile = passwordPath
 	if c.Log.Level != "debug" && c.Log.Level != "info" && c.Log.Level != "warn" && c.Log.Level != "error" {
 		return errors.New("log.level is invalid")
 	}
@@ -449,10 +469,16 @@ func (c *Config) CheckWritablePaths() error {
 	for _, item := range []struct {
 		name string
 		file FileConfig
-	}{{"audit", c.Audit}, {"log", c.Log.FileConfig}} {
+	}{{"audit", c.Audit}, {"log", c.Log.FileConfig}, {"password state", FileConfig{Path: c.Auth.PasswordHashFile}}} {
 		dir := filepath.Dir(item.file.Path)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("%s directory: %w", item.name, err)
+		}
+		if item.name == "password state" {
+			info, err := os.Lstat(dir)
+			if err != nil || !info.IsDir() || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
+				return errors.New("password state directory has unsafe mode or type")
+			}
 		}
 		probe, err := os.CreateTemp(dir, ".hydra-admin-check-*")
 		if err != nil {
@@ -465,7 +491,7 @@ func (c *Config) CheckWritablePaths() error {
 			return fmt.Errorf("%s probe removal: %w", item.name, err)
 		}
 		if stat, err := os.Lstat(item.file.Path); err == nil {
-			if !stat.Mode().IsRegular() || stat.Mode().Perm()&0077 != 0 {
+			if !stat.Mode().IsRegular() || ((item.name != "password state" || runtime.GOOS != "windows") && stat.Mode().Perm()&0077 != 0) {
 				return fmt.Errorf("%s file has unsafe mode or type", item.name)
 			}
 			file, err := os.OpenFile(item.file.Path, os.O_WRONLY|os.O_APPEND, 0)
@@ -476,6 +502,9 @@ func (c *Config) CheckWritablePaths() error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("%s file: %w", item.name, err)
 		}
+	}
+	if _, err := auth.LoadPasswordHash(c.Auth.PasswordHashFile); err != nil {
+		return err
 	}
 	return nil
 }

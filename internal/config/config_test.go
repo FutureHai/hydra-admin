@@ -23,7 +23,7 @@ hydra:
   token_revoke_enabled: false
 auth:
   username: "admin"
-  password_hash: "$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  password_hash_file: "./state/password.hash"
   session_ttl: 8h
   session_cookie_name: "hydra_admin_session"
   max_sessions: 20
@@ -56,8 +56,15 @@ log:
 
 func loadText(t *testing.T, body string) (*Config, error) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "state"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state", "password.hash"), []byte("$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return Load(path)
@@ -78,7 +85,7 @@ func TestStrictYAMLAndValidation(t *testing.T) {
 		{"unknown top level", "server:\n", "surprise: true\nserver:\n"},
 		{"unknown nested", "  port: 8085", "  port: 8085\n  surprise: true"},
 		{"empty user", `username: "admin"`, `username: ""`},
-		{"empty hash", `password_hash: "$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"`, `password_hash: ""`},
+		{"legacy hash field", `username: "admin"`, "username: \"admin\"\n  password_hash: \"legacy\""},
 		{"duration without unit", "read_timeout: 15s", "read_timeout: 15"},
 		{"invalid duration", "read_timeout: 15s", "read_timeout: bad"},
 		{"invalid CIDR", `"127.0.0.1/32"`, `"127.0.0.1/99"`},
@@ -100,6 +107,40 @@ func TestStrictYAMLAndValidation(t *testing.T) {
 	}
 	if _, err := loadText(t, validYAML+"---\n{}\n"); err == nil {
 		t.Fatal("multiple YAML documents accepted")
+	}
+}
+
+func TestPasswordStatePathAndHashValidation(t *testing.T) {
+	cfg, err := loadText(t, validYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(cfg.Auth.PasswordHashFile) || filepath.Base(cfg.Auth.PasswordHashFile) != "password.hash" {
+		t.Fatal("default password state path not normalized")
+	}
+	if err := os.Remove(cfg.Auth.PasswordHashFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.CheckWritablePaths(); err == nil {
+		t.Fatal("missing password file accepted")
+	}
+	if err := os.WriteFile(cfg.Auth.PasswordHashFile, []byte("$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"../password.hash", "./logs/audit.jsonl", "./logs/app.jsonl", "./config.yaml"} {
+		body := strings.Replace(validYAML, `password_hash_file: "./state/password.hash"`, `password_hash_file: "`+path+`"`, 1)
+		if _, err := loadText(t, body); err == nil {
+			t.Fatalf("invalid password state path accepted: %s", path)
+		}
+	}
+	if err := cfg.CheckWritablePaths(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg.Auth.PasswordHashFile, []byte("invalid\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.CheckWritablePaths(); err == nil {
+		t.Fatal("invalid saved password hash accepted")
 	}
 }
 

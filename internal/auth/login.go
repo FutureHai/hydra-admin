@@ -2,7 +2,9 @@ package auth
 
 import (
 	"crypto/subtle"
+	"errors"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -24,10 +26,15 @@ type LoginOutcome struct {
 
 type LoginService struct {
 	Username, PasswordHash, PublicBaseURL string
+	PasswordFile                          string
 	Sessions                              *SessionStore
 	PreAuth                               *PreAuthStore
 	Limiter                               *LoginLimiter
+	mu                                    sync.Mutex
 }
+
+var ErrCurrentPasswordInvalid = errors.New("current password is invalid")
+var ErrPasswordUnchanged = errors.New("new password must differ from current password")
 
 func (s *LoginService) Attempt(input LoginInput, now time.Time) LoginOutcome {
 	if !ValidateOrigin(input.Origin, input.Referer, s.PublicBaseURL) {
@@ -44,6 +51,8 @@ func (s *LoginService) Attempt(input LoginInput, now time.Time) LoginOutcome {
 		return LoginOutcome{Status: http.StatusUnauthorized, Message: InvalidCredentialsMessage}
 	}
 	usernameOK := subtle.ConstantTimeCompare([]byte(input.Username), []byte(s.Username)) == 1
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	passwordOK := VerifyPassword(s.PasswordHash, []byte(input.Password))
 	if !usernameOK || !passwordOK {
 		return LoginOutcome{Status: http.StatusUnauthorized, Message: InvalidCredentialsMessage}
@@ -54,4 +63,26 @@ func (s *LoginService) Attempt(input LoginInput, now time.Time) LoginOutcome {
 	}
 	s.Limiter.RecordSuccess(input.SourceIP, input.Username)
 	return LoginOutcome{Status: http.StatusOK, Session: session}
+}
+
+// ChangePassword serializes credential changes with login session creation.
+func (s *LoginService) ChangePassword(current, next string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !VerifyPassword(s.PasswordHash, []byte(current)) {
+		return ErrCurrentPasswordInvalid
+	}
+	if subtle.ConstantTimeCompare([]byte(current), []byte(next)) == 1 {
+		return ErrPasswordUnchanged
+	}
+	hash, err := GeneratePasswordHash([]byte(next), "argon2id")
+	if err != nil {
+		return err
+	}
+	if err := SavePasswordHash(s.PasswordFile, hash); err != nil {
+		return err
+	}
+	s.PasswordHash = hash
+	s.Sessions.DeleteAll()
+	return nil
 }

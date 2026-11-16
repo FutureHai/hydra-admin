@@ -31,18 +31,19 @@ for target in "${release_targets[@]}"; do
     cat <<'EOF'
 The executable includes the web UI. The target host needs a supported Hydra
 Admin API but does not need Node.js, Go or a console database. The example
-config contains placeholders and an invalid password hash; replace them
+config contains URL placeholders. Create a private password hash file
 before starting the service.
 
 1. Verify the archive checksum against its adjacent `.sha256` file, then
    verify the files against `SHA256SUMS` in this directory.
 2. Run `hydra-admin version` (or `hydra-admin.exe version` on Windows) and
    review `SUPPORTED_HYDRA_VERSIONS.md`.
-3. Run `hydra-admin hash-password` in an interactive terminal, then set
-   `auth.password_hash`, the console URL and Hydra URLs in `config.yaml`.
+3. In an interactive terminal, create `state/password.hash` with the output
+   of `hydra-admin hash-password`; set the console URL and Hydra URLs in `config.yaml`.
    It defaults to Argon2id; use `hash-password --algorithm bcrypt` if needed.
-4. Restrict access to `config.yaml` and choose private writable log and audit
-   paths. On Unix, run `chmod 600 config.yaml`.
+4. Restrict access to `config.yaml` and choose private writable state, log and
+   audit paths. On Unix, run `umask 077; mkdir -p state` before redirecting
+   `hydra-admin hash-password > state/password.hash`.
 5. Run `hydra-admin check --config config.yaml`, then
    `hydra-admin serve --config config.yaml`. On Unix, prefix the executable
    with `./`; on Windows PowerShell, use `.\hydra-admin.exe`.
@@ -53,8 +54,8 @@ PowerShell and compare each result with `SHA256SUMS`.
 
 Keep the Hydra Admin API on a restricted network. Prefer a correctly configured
 HTTPS proxy for browser access; HTTP exposes passwords and session cookies in
-transit. `check` sends no write request to Hydra, but creates/checks local log
-and audit directories and temporary write
+transit. `check` sends no write request to Hydra, but checks the password file
+and creates/checks local state, log and audit directories using temporary write
 probes; those paths must be writable. Complete target-environment acceptance
 before production writes.
 Linux systemd setup and release guidance are in the

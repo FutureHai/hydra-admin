@@ -91,6 +91,7 @@ func (s *SessionStore) Get(id string, now time.Time) (Session, bool) {
 }
 
 func (s *SessionStore) Delete(id string)      { s.mu.Lock(); delete(s.sessions, id); s.mu.Unlock() }
+func (s *SessionStore) DeleteAll()            { s.mu.Lock(); clear(s.sessions); s.mu.Unlock() }
 func (s *SessionStore) Len() int              { s.mu.Lock(); defer s.mu.Unlock(); return len(s.sessions) }
 func (s *SessionStore) Cleanup(now time.Time) { s.mu.Lock(); s.cleanupLocked(now); s.mu.Unlock() }
 

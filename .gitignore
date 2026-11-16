@@ -6,6 +6,7 @@
 !/assets/dist/BUILD_WEB_FIRST.txt
 /dist/
 /logs/
+/state/
 /config.yaml
 /hydra-admin
 /*.local.yaml

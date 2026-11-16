@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 import { api, clearAuthMemory, onUnauthorized, setCsrfToken } from './api'
 
@@ -7,6 +8,7 @@ type AuthState = { loading: boolean; session: Session | null }
 type AuthContextValue = AuthState & {
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
+  changePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -60,7 +62,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate('/login', { replace: true })
   }, [navigate])
 
-  const value = useMemo(() => ({ ...state, login, logout }), [state, login, logout])
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string, confirmPassword: string) => {
+    let auditWarning = false
+    try {
+      await api.post('/auth/password', { current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword })
+    } catch (error) {
+      if (!axios.isAxiosError(error) || error.response?.data?.code !== 'password_changed_audit_failed') throw error
+      auditWarning = true
+    }
+    clearAuthMemory()
+    setState({ loading: false, session: null })
+    navigate('/login', { replace: true, state: { passwordChanged: true, auditWarning } })
+  }, [navigate])
+
+  const value = useMemo(() => ({ ...state, login, logout, changePassword }), [state, login, logout, changePassword])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

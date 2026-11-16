@@ -50,6 +50,9 @@ html, body, #root { min-height: 100%; margin: 0; }
 .spec-crumb strong { color: var(--color-text); font-weight: 650; overflow: hidden; text-overflow: ellipsis; }
 .spec-crumb-separator { color: #c4cbd5; }
 .spec-header-actions { display: flex; align-items: center; gap: 16px; white-space: nowrap; }
+.spec-account-name { display: inline-flex; align-items: center; gap: 7px; color: var(--color-text-secondary); font-size: 12px; }
+.spec-account-link { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; color: var(--color-primary) !important; font-size: 12px; font-weight: 500; }
+.spec-account-link:hover { color: var(--color-primary-hover) !important; }
 .spec-logout { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; color: #4b5563 !important; background: transparent; font-size: 12px; cursor: pointer; }
 .spec-logout-error { color: var(--status-danger); font-size: 12px; }
 .spec-menu-button { display: none; border: 0; background: transparent; color: #4b5563; }
@@ -208,6 +211,15 @@ html, body, #root { min-height: 100%; margin: 0; }
 .spec-login-form input:-webkit-autofill:focus { -webkit-box-shadow: 0 0 0 1000px #fff inset !important; -webkit-text-fill-color: var(--color-text) !important; caret-color: var(--color-text); }
 .spec-login-form .ant-btn { height: 36px; margin-top: 6px; font-weight: 600; }
 .spec-login-feedback { margin-top: 16px; }
+.spec-password-page { max-width: 640px; }
+.spec-password-panel { padding-bottom: 22px; }
+.spec-password-form { max-width: 440px; }
+.spec-password-form .ant-form-item { margin-bottom: 18px; }
+.spec-password-form .ant-form-item-label { padding-bottom: 4px; }
+.spec-password-form .ant-form-item-label > label { font-size: 13px; font-weight: 600; }
+.spec-password-form .ant-form-item-extra { margin-top: 4px; color: var(--color-text-secondary); font-size: 12px; }
+.spec-password-error { margin-bottom: 16px; }
+.spec-password-actions { padding-top: 4px; }
 @media (max-width: 1100px) {
   .spec-sidebar { width: 192px; }
   .spec-brand { padding: 0 14px; }
@@ -227,6 +239,9 @@ html, body, #root { min-height: 100%; margin: 0; }
   .spec-topbar { gap: 10px; padding: 0 15px; }
   .spec-content { padding: 21px 15px 36px; }
   .spec-header-actions { gap: 8px; }
+  .spec-account-name { display: none; }
+  .spec-account-link { justify-content: center; min-width: 40px; }
+  .spec-account-link span:last-child { display: none; }
   .spec-logout span { display: none; }
   .spec-page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
   .spec-page-heading h1 { font-size: 22px; }

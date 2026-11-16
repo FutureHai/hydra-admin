@@ -3,7 +3,7 @@ import { ConfigProvider } from 'antd'
 import {
   AppstoreOutlined, AuditOutlined, DatabaseOutlined, HomeOutlined,
   KeyOutlined, LogoutOutlined, MenuOutlined, SafetyCertificateOutlined,
-  SettingOutlined, TagsOutlined,
+  SettingOutlined, TagsOutlined, UserOutlined,
 } from '@ant-design/icons'
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
@@ -13,6 +13,7 @@ import { SpecAudit, SpecCollection } from './SpecPages'
 import { SpecClientDetail, SpecClients } from '../clients/ClientPages'
 import { SpecClientCreate } from '../clients/ClientWritePages'
 import { TokenPage } from '../tokens/TokenPage'
+import { SpecPasswordPage } from './SpecPasswordPage'
 
 export const specTheme = {
   token: {
@@ -63,12 +64,12 @@ const nav = [
 const titles: Record<string, string> = {
   '/': '概览', '/clients': 'Client', '/clients/new': '创建 Client',
   '/scopes': 'Scope', '/audiences': 'Audience', '/token': 'Token 工具',
-  '/audit': '审计', '/system': '系统状态',
+  '/audit': '审计', '/system': '系统状态', '/account/password': '修改密码',
 }
 
 function Shell() {
   const location = useLocation()
-  const { logout } = useAuth()
+  const { logout, session } = useAuth()
   const [mobileNav, setMobileNav] = useState(false)
   const [logoutError, setLogoutError] = useState(false)
   const title = titles[location.pathname] ?? (location.pathname.startsWith('/clients/') ? 'Client 详情' : '概览')
@@ -88,7 +89,7 @@ function Shell() {
       <header className="spec-topbar">
         <button className="spec-menu-button" type="button" onClick={() => setMobileNav(!mobileNav)} aria-label="切换导航" aria-expanded={mobileNav}><MenuOutlined /></button>
         <div className="spec-crumb"><span>首页</span><span className="spec-crumb-separator">/</span><strong>{title}</strong></div>
-        <div className="spec-header-actions">{logoutError && <span role="alert" className="spec-logout-error">退出失败，请重试</span>}<button type="button" className="spec-logout" aria-label="退出登录" onClick={() => { setLogoutError(false); void logout().catch(() => setLogoutError(true)) }}><LogoutOutlined /><span>退出登录</span></button></div>
+        <div className="spec-header-actions"><span className="spec-account-name"><UserOutlined />{session?.username}</span><Link to="/account/password" className="spec-account-link" aria-label="修改密码"><KeyOutlined /><span>修改密码</span></Link>{logoutError && <span role="alert" className="spec-logout-error">退出失败，请重试</span>}<button type="button" className="spec-logout" aria-label="退出登录" onClick={() => { setLogoutError(false); void logout().catch(() => setLogoutError(true)) }}><LogoutOutlined /><span>退出登录</span></button></div>
       </header>
       <div className="spec-content"><div className="spec-content-inner"><Outlet /></div></div>
     </div>
@@ -115,6 +116,7 @@ export function SpecApp() {
         <Route path="token" element={<TokenPage />} />
         <Route path="audit" element={<SpecAudit />} />
         <Route path="system" element={<SpecSystem />} />
+        <Route path="account/password" element={<SpecPasswordPage />} />
       </Route>
       <Route path="spec/*" element={<PreviewRouteRedirect />} />
       <Route path="*" element={<Navigate to="/" replace />} />

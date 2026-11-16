@@ -18,7 +18,7 @@ Go + React 管理台，用于管理 ORY Hydra Client，并查看 Scope、Audienc
 
 ## 功能与当前限制
 
-可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。审计查询每批最多扫描 8 MiB，可通过游标继续查找更早记录；归档仍受 `max_archives` 保留数量限制。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
+可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。审计查询每批最多扫描 8 MiB，可通过游标继续查找更早记录；归档仍受 `max_archives` 保留数量限制。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。管理员可在页面修改密码；修改后所有会话退出。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
 
 - Client 列表使用 Hydra 游标分页，每页 10 条；Scope / Audience 每次读取最多 100 个 Client，可逐批继续读取并聚合，直到 Hydra 返回末页。读取期间 Client 变化可能影响结果。
 - 可在 Client 详情编辑高级授权/登出设置，并独立调整 Token 有效期；替换整个 Client 的 PUT 和 Secret 轮换关闭。Token 操作按能力探测及配置显示。
@@ -29,12 +29,12 @@ Go + React 管理台，用于管理 ORY Hydra Client，并查看 Scope、Audienc
 ## 快速开始
 
 1. 从 [最新 Release](https://github.com/FutureHai/hydra-admin/releases/latest) 下载对应系统的压缩包和同名 `.sha256`，按[下文](#直接下载二进制包)校验并解压。
-2. 在交互终端运行 `./hydra-admin hash-password`（Windows 用 `.\hydra-admin.exe`），将输出写入 `config.yaml` 的 `auth.password_hash`。
+2. 在交互终端生成密码哈希，保存到 `auth.password_hash_file` 指定的文件（默认 `./state/password.hash`）。
 3. 设置 `server.public_base_url`、`hydra.admin_replicas` 中的 Admin 地址，并按[访问方式](#访问方式)检查监听、Cookie 与代理配置。
 4. 保护配置文件，在解压目录运行 `./hydra-admin check --config ./config.yaml`，再运行 `./hydra-admin serve --config ./config.yaml`。
 5. 在浏览器打开 `server.public_base_url`。Windows 将上述启动命令中的 `./hydra-admin` 换成 `.\hydra-admin.exe`。
 
-`check` 不向 Hydra 发写请求，但会在本地创建日志/审计目录、创建并删除临时探针文件，并检查已有文件的写权限。相关路径需要可写；只读挂载且没有可写目录时会失败。
+`check` 不向 Hydra 发写请求，但会在本地创建日志、审计及密码状态目录，创建并删除临时探针文件，并检查已有文件的写权限及密码哈希格式。密码文件必须存在，相关目录需要可写；只读挂载且没有可写目录时会失败。
 
 ## 界面预览
 
@@ -126,12 +126,14 @@ Get-Content SHA256SUMS | ForEach-Object {
 
 ### 配置并启动
 
-在**解压后的包目录**先生成密码哈希，再编辑 `config.yaml`。至少设置 `server.public_base_url`（浏览器访问管理台的根地址）、`hydra.admin_replicas` 中的 Admin 地址和 `auth.password_hash`。`hash-password` 会在交互终端静默读取两次密码；把输出的哈希填入配置，示例哈希不能登录。程序根据浏览器地址、监听 IP 和可信代理自动判断访问方式；非回环 HTTP 只需显式设置 `security.allow_insecure_http: true`。Hydra Admin 副本可配置管理台机器能够直接访问的 HTTP/HTTPS 地址，支持 IP 或域名；这里的 HTTP 不需要设置 `security.allow_insecure_http`，该开关只控制浏览器访问管理台。`hydra.public_api_base_url` 若用于 revoke，跨主机访问仍需 HTTPS。
+在**解压后的包目录**先生成密码哈希文件，再编辑 `config.yaml`。至少设置 `server.public_base_url`（浏览器访问管理台的根地址）、`hydra.admin_replicas` 中的 Admin 地址。`hash-password` 会在交互终端静默读取两次密码；配置文件不保存密码哈希。程序根据浏览器地址、监听 IP 和可信代理自动判断访问方式；非回环 HTTP 只需显式设置 `security.allow_insecure_http: true`。Hydra Admin 副本可配置管理台机器能够直接访问的 HTTP/HTTPS 地址，支持 IP 或域名；这里的 HTTP 不需要设置 `security.allow_insecure_http`，该开关只控制浏览器访问管理台。`hydra.public_api_base_url` 若用于 revoke，跨主机访问仍需 HTTPS。
 
 ```bash
 chmod 600 config.yaml
-./hydra-admin hash-password
-# 如需 bcrypt：./hydra-admin hash-password --algorithm bcrypt
+umask 077
+mkdir -p state
+./hydra-admin hash-password > state/password.hash
+# 如需 bcrypt：./hydra-admin hash-password --algorithm bcrypt > state/password.hash
 ```
 
 编辑并保存 `config.yaml` 后，在同一目录执行：
@@ -141,9 +143,11 @@ chmod 600 config.yaml
 ./hydra-admin serve --config ./config.yaml
 ```
 
-Windows 在 PowerShell 中运行 `.\hydra-admin.exe hash-password`，把哈希写入 `config.yaml` 并限制该文件的访问权限，再执行 `.\hydra-admin.exe check --config .\config.yaml` 和 `.\hydra-admin.exe serve --config .\config.yaml`。成功后，在浏览器打开 `server.public_base_url`。
+Windows 在 PowerShell 中先创建 `state` 目录，再在交互终端运行 `$hash = .\hydra-admin.exe hash-password`，用 `[System.IO.File]::WriteAllText((Join-Path (Get-Location) 'state\password.hash'), $hash + [Environment]::NewLine, [System.Text.Encoding]::ASCII)` 保存哈希，并将该文件权限限制为运行账号可访问。之后执行 `.\hydra-admin.exe check --config .\config.yaml` 和 `.\hydra-admin.exe serve --config .\config.yaml`。成功后，在浏览器打开 `server.public_base_url`。
 
 常用配置：`auth.session_ttl` 控制会话有效期；`auth.login` 控制登录失败次数与锁定时长；`security.api_rate_limit` 控制读取和写入请求的每 IP 速率；`audit` / `log` 控制文件大小、保留归档数和权限。可选的 `resource_catalog` 为 Audience 设置可选 Scope。当前示例值和全部字段以 [config.example.yaml](configs/config.example.yaml) 为准。
+
+登录后点击顶栏“修改密码”，输入当前密码、新密码和确认密码。新密码至少 12 个字符；修改成功后所有会话失效，需使用新密码登录。密码哈希只保存在 `auth.password_hash_file`（默认 `./state/password.hash`，Unix 权限 `0600`；Windows 应限制为运行账号可访问），页面修改时原子更新。启动必须有有效的哈希文件，升级或备份时须保留；丢失时重新运行 `hash-password` 创建文件。
 
 `GET /healthz` 无需登录，成功时返回 HTTP 200 和 `{"status":"ok"}`；可用于服务存活探针。`GET /readyz` 无需登录，在本地审计写入可用时返回 200，审计故障后返回 503；可对其设置告警。审计故障后会停止新的受审计操作，排查日志并核对可能已在 Hydra 成功的操作后重启服务。两者均不代表 Hydra 就绪或版本受支持；Hydra 状态及禁用原因请看管理台状态页或 `check` 报告。
 
@@ -257,7 +261,7 @@ Nginx 在其他服务器时，将 `bind_address` 改为管理台的可达内网 
 
 ## Linux systemd 后台运行
 
-以下命令在**已解压并配置好的 Linux 发布包目录**执行，适用于使用 `systemd` 的发行版。先完成上面的密码、Hydra 地址和管理台 URL 配置，并确认 `./hydra-admin check --config ./config.yaml` 通过。示例把程序装在 `/opt/hydra-admin`，以专用用户运行；`audit.path` 和 `log.path` 保持示例配置中的 `./logs/...`。
+以下命令在**已解压并配置好的 Linux 发布包目录**执行，适用于使用 `systemd` 的发行版。先完成上面的密码、Hydra 地址和管理台 URL 配置，并确认 `./hydra-admin check --config ./config.yaml` 通过。示例把程序装在 `/opt/hydra-admin`，以专用用户运行；`audit.path` 和 `log.path` 保持示例配置中的 `./logs/...`，`auth.password_hash_file` 保持 `./state/password.hash`。
 
 ```bash
 if ! getent group hydra-admin >/dev/null 2>&1; then
@@ -279,6 +283,13 @@ else
   sudo cp -R ./LICENSE ./SUPPORTED_HYDRA_VERSIONS.md ./THIRD_PARTY_NOTICES.md ./licenses /opt/hydra-admin/
 fi
 sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/logs
+sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/state
+if [ ./state/password.hash -ef /opt/hydra-admin/state/password.hash ]; then
+  sudo chown hydra-admin:hydra-admin ./state/password.hash
+  sudo chmod 0600 ./state/password.hash
+else
+  sudo install -m 0600 -o hydra-admin -g hydra-admin ./state/password.hash /opt/hydra-admin/state/password.hash
+fi
 sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml'
 ```
 
@@ -303,14 +314,14 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/opt/hydra-admin/logs
+ReadWritePaths=/opt/hydra-admin/logs /opt/hydra-admin/state
 UMask=0077
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`UMask=0077` 与配置中的 `audit.file_mode`、`log.file_mode: "0600"` 相容。若修改日志或审计文件路径，要同步调整 `ReadWritePaths` 和目录权限。保存服务文件后执行：
+`UMask=0077` 与配置中的 `audit.file_mode`、`log.file_mode: "0600"` 相容。若修改日志、审计或密码状态文件路径，要同步调整 `ReadWritePaths` 和目录权限。保存服务文件后执行：
 
 ```bash
 sudo systemd-analyze verify /etc/systemd/system/hydra-admin.service
@@ -324,12 +335,14 @@ curl -f http://127.0.0.1:8085/healthz  # bind_address 为内网 IP 时，改用�
 
 ## 升级回滚与卸载
 
-升级前从 [Release](https://github.com/FutureHai/hydra-admin/releases) 下载并校验新包，在**独立临时目录**解压，查看新版本说明及示例配置差异。保留现有 `config.yaml`、日志与审计文件，先备份当前二进制和配置，再停止服务、替换二进制并以服务用户运行 `check`：
+升级前从 [Release](https://github.com/FutureHai/hydra-admin/releases) 下载并校验新包，在**独立临时目录**解压，查看新版本说明及示例配置差异。保留现有 `config.yaml`、`state/`、日志与审计文件，先备份当前二进制、配置和密码状态目录，再停止服务、替换二进制并以服务用户运行 `check`：
 
 ```bash
 sudo cp -p /opt/hydra-admin/hydra-admin /opt/hydra-admin/hydra-admin.previous
 sudo cp -p /opt/hydra-admin/config.yaml /opt/hydra-admin/config.yaml.previous
+sudo cp -a /opt/hydra-admin/state "/opt/hydra-admin/state.previous.$(date +%Y%m%d%H%M%S)"
 sudo systemctl stop hydra-admin
+sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/state
 # 当前目录应为新包的独立解压目录，不应是 /opt/hydra-admin
 sudo install -m 0755 -o root -g root ./hydra-admin /opt/hydra-admin/hydra-admin
 sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml' && sudo systemctl start hydra-admin
@@ -345,7 +358,7 @@ sudo cp -p /opt/hydra-admin/config.yaml.previous /opt/hydra-admin/config.yaml
 sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml' && sudo systemctl start hydra-admin
 ```
 
-卸载时先备份需保留的配置、日志与审计文件。然后执行 `sudo systemctl disable --now hydra-admin`，删除 `/etc/systemd/system/hydra-admin.service` 并运行 `sudo systemctl daemon-reload`。确认备份后可删除 `/opt/hydra-admin`，再按需删除专用 `hydra-admin` 用户和组。若为管理台配置了 Nginx 路由，也要一并移除。
+卸载时先备份需保留的配置、密码状态、日志与审计文件。然后执行 `sudo systemctl disable --now hydra-admin`，删除 `/etc/systemd/system/hydra-admin.service` 并运行 `sudo systemctl daemon-reload`。确认备份后可删除 `/opt/hydra-admin`，再按需删除专用 `hydra-admin` 用户和组。若为管理台配置了 Nginx 路由，也要一并移除。
 
 ## 从源码构建（开发）
 
@@ -355,8 +368,10 @@ sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config .
 make web-install
 make build
 cp configs/config.example.yaml config.yaml
-./dist/hydra-admin hash-password
-# 将生成的哈希写入 config.yaml，并填写管理台 URL 与 Hydra Admin 地址
+umask 077
+mkdir -p state
+./dist/hydra-admin hash-password > state/password.hash
+# 在 config.yaml 填写管理台 URL 与 Hydra Admin 地址
 ./dist/hydra-admin check --config config.yaml
 ./dist/hydra-admin serve --config config.yaml
 ```

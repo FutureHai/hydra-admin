@@ -56,9 +56,15 @@ func TestCheckReadOnlyCapabilityReport(t *testing.T) {
 	text := strings.Replace(string(example), "https://<ADMIN_CONSOLE_FQDN>", "http://127.0.0.1:8085", 1)
 	text = strings.Replace(text, "cookie_secure: true", "cookie_secure: false", 1)
 	text = strings.Replace(text, "http://127.0.0.1:4445", hydra.URL, 1)
-	text = strings.Replace(text, "$argon2id$v=19$m=65536,t=3,p=2$REPLACE_WITH_BASE64_SALT$REPLACE_WITH_BASE64_HASH", "$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", 1)
-	path := filepath.Join(t.TempDir(), "config.yaml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "state"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state", "password.hash"), []byte("$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
@@ -79,5 +85,13 @@ func TestCheckReadOnlyCapabilityReport(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "logs", "audit.jsonl")); !os.IsNotExist(err) {
 		t.Fatal("check should not create log file")
+	}
+	if err := os.Remove(filepath.Join(dir, "state", "password.hash")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"check", "--config", path}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "password file is missing") {
+		t.Fatalf("check accepted missing password file: exit=%d error=%s", code, errOut.String())
 	}
 }

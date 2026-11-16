@@ -132,7 +132,7 @@ jobs:
           grep -E 'not a dynamic executable|statically linked' /tmp/hydra-ldd.txt
           test -s assets/dist/index.html
           test -s dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/config.yaml
-          grep -F 'REPLACE_WITH_BASE64_HASH' dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/config.yaml
+          grep -F 'password_hash_file:' dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/config.yaml
           test -s dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/licenses/UPSTREAM_SOURCES.md
           ! grep -F 'UPSTREAM_FILE_ABSENT' dist/hydra-admin-v"$RELEASE_VERSION"-linux-amd64/licenses/MANIFEST.tsv
       - name: Clean Ubuntu 20.04 AMD64 runtime smoke
@@ -141,6 +141,7 @@ jobs:
             -v "$PWD/dist/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz:/opt/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz:ro" \
             -v "$PWD/dist/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz.sha256:/opt/hydra-admin-v${RELEASE_VERSION}-linux-amd64.tar.gz.sha256:ro" \
             -v "$PWD/tests/fixtures/smoke-config.yaml:/tmp/config.yaml:ro" \
+            -v "$PWD/tests/fixtures/password.hash:/tmp/password.hash.fixture:ro" \
             -e RELEASE_VERSION="$RELEASE_VERSION" -w /opt ubuntu:20.04 bash -euc '
               apt-get update -qq
               DEBIAN_FRONTEND=noninteractive apt-get install -y -qq file >/dev/null
@@ -154,6 +155,8 @@ jobs:
               grep -E "not a dynamic executable|statically linked" /tmp/ldd.txt
               ! command -v node
               ! command -v go
+              install -d -m 0700 /tmp/state
+              install -m 0600 /tmp/password.hash.fixture /tmp/state/password.hash
               ./hydra-admin version | grep -F "hydra-admin ${RELEASE_VERSION}"
               ./hydra-admin serve --config /tmp/config.yaml >/tmp/serve.out 2>&1 &
               pid=$!

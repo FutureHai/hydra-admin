@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Alert, Button, Form, Input } from 'antd'
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons'
 import axios from 'axios'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 
 type Fields = { username: string; password: string }
@@ -10,6 +10,8 @@ type Fields = { username: string; password: string }
 export function SpecLogin() {
   const [form] = Form.useForm<Fields>()
   const { loading, session, login } = useAuth()
+  const location = useLocation()
+  const passwordState = location.state as { passwordChanged?: boolean; auditWarning?: boolean } | null
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -37,6 +39,7 @@ export function SpecLogin() {
       <div className="spec-login-identity"><span className="spec-login-mark"><SafetyCertificateOutlined /></span><div><strong>Hydra Admin Console</strong><span>OAuth 2.0 管理</span></div></div>
       <section className="spec-login-card" aria-labelledby="spec-login-title">
         <div className="spec-login-card-head"><h1 id="spec-login-title">管理员登录</h1><p>输入管理员凭据以访问控制台</p></div>
+        {passwordState?.passwordChanged && <Alert className="spec-login-notice" type={passwordState.auditWarning ? 'warning' : 'success'} showIcon title={passwordState.auditWarning ? '密码已修改，但审计写入失败。请使用新密码重新登录并检查服务日志。' : '密码已修改，请使用新密码重新登录。'} />}
         <Form<Fields> form={form} layout="vertical" requiredMark={false} onFinish={submit} className="spec-login-form">
           <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}><Input prefix={<UserOutlined />} autoComplete="username" placeholder="管理员用户名" /></Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}><Input.Password prefix={<LockOutlined />} autoComplete="current-password" placeholder="输入密码" /></Form.Item>

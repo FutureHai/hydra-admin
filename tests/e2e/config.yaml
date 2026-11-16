@@ -15,7 +15,7 @@ hydra:
   token_revoke_enabled: false
 auth:
   username: "admin"
-  password_hash: "$2a$12$weA3RbmfVhAOrVdfcBgYYOt3wmKztLaM.691ZQ.p/jdMyXNq2pzMm"
+  password_hash_file: "./state/password.hash"
   session_ttl: 8h
   session_cookie_name: "hydra_admin_session"
   max_sessions: 20

@@ -68,6 +68,12 @@ func TestServeCompletesInFlightRequestOnSIGTERM(t *testing.T) {
 	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "state"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state", "password.hash"), []byte("$2a$12$weA3RbmfVhAOrVdfcBgYYOt3wmKztLaM.691ZQ.p/jdMyXNq2pzMm\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

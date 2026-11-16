@@ -10,13 +10,14 @@ const mock = new MockAdapter(api)
 afterEach(() => { mock.reset(); clearAuthMemory(); onUnauthorized(null) })
 
 function Controls() {
-  const { loading, session, login, logout } = useAuth()
+  const { loading, session, login, logout, changePassword } = useAuth()
   const location = useLocation()
   return <div>
     <span data-testid="path">{location.pathname}</span>
     <span data-testid="session">{loading ? 'loading' : session?.username ?? 'anonymous'}</span>
     <button onClick={() => void login('admin', 'test-only-password')}>login</button>
     <button onClick={() => void logout()}>logout</button>
+    <button onClick={() => void changePassword('old-password', 'new-admin-password-2026', 'new-admin-password-2026')}>change password</button>
   </div>
 }
 
@@ -56,4 +57,36 @@ it('redirects after a protected request receives 401', async () => {
   await expect(api.get('/clients')).rejects.toMatchObject({ response: { status: 401 } })
   await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/login'))
   await waitFor(() => expect(screen.getByTestId('session')).toHaveTextContent('anonymous'))
+})
+
+it('clears in-memory authentication and redirects to login after changing password', async () => {
+  mock.onGet('/auth/session').reply(200, { username: 'admin', expires_at: '2099-01-01' })
+  mock.onGet('/auth/csrf').reply(200, { csrf_token: 'session-csrf' })
+  mock.onPost('/auth/password').reply(config => {
+    expect((config.headers as AxiosHeaders).get('X-CSRF-Token')).toBe('session-csrf')
+    expect(JSON.parse(config.data)).toEqual({
+      current_password: 'old-password',
+      new_password: 'new-admin-password-2026',
+      confirm_password: 'new-admin-password-2026',
+    })
+    return [204]
+  })
+  render(<MemoryRouter initialEntries={['/account/password']}><AuthProvider><Routes><Route path="*" element={<Controls />} /></Routes></AuthProvider></MemoryRouter>)
+  await waitFor(() => expect(screen.getByTestId('session')).toHaveTextContent('admin'))
+  fireEvent.click(screen.getByText('change password'))
+  await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/login'))
+  expect(screen.getByTestId('session')).toHaveTextContent('anonymous')
+  expect(localStorage.length).toBe(0)
+  expect(sessionStorage.length).toBe(0)
+})
+
+it('redirects to re-login when the password changed but its audit entry failed', async () => {
+  mock.onGet('/auth/session').reply(200, { username: 'admin', expires_at: '2099-01-01' })
+  mock.onGet('/auth/csrf').reply(200, { csrf_token: 'session-csrf' })
+  mock.onPost('/auth/password').reply(500, { code: 'password_changed_audit_failed' })
+  render(<MemoryRouter initialEntries={['/account/password']}><AuthProvider><Routes><Route path="*" element={<Controls />} /></Routes></AuthProvider></MemoryRouter>)
+  await waitFor(() => expect(screen.getByTestId('session')).toHaveTextContent('admin'))
+  fireEvent.click(screen.getByText('change password'))
+  await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/login'))
+  expect(screen.getByTestId('session')).toHaveTextContent('anonymous')
 })

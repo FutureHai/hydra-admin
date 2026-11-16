@@ -77,7 +77,11 @@ func New(cfg *config.Config, web fs.FS, recorder *audit.Recorder, logger *slog.L
 	}
 	s := &Server{Config: cfg, Engine: engine, Sessions: sessions, PreAuth: auth.NewPreAuthStore(), Audit: recorder, auditReader: recorder, Logger: logger, web: web, index: index, proxies: proxies,
 		apiLimit: auth.NewIPLimiter(cfg.Security.APIRateLimit.ReadPerMinutePerIP, cfg.Security.APIRateLimit.WritePerMinutePerIP)}
-	s.Login = &auth.LoginService{Username: cfg.Auth.Username, PasswordHash: cfg.Auth.PasswordHash, PublicBaseURL: cfg.Server.PublicBaseURL, Sessions: sessions, PreAuth: s.PreAuth,
+	passwordHash, err := auth.LoadPasswordHash(cfg.Auth.PasswordHashFile)
+	if err != nil {
+		return nil, err
+	}
+	s.Login = &auth.LoginService{Username: cfg.Auth.Username, PasswordHash: passwordHash, PasswordFile: cfg.Auth.PasswordHashFile, PublicBaseURL: cfg.Server.PublicBaseURL, Sessions: sessions, PreAuth: s.PreAuth,
 		Limiter: auth.NewLoginLimiter(cfg.Auth.Login.Window.Value(), cfg.Auth.Login.MaxAttemptsPerIP, cfg.Auth.Login.MaxAttemptsPerUsername, cfg.Auth.Login.LockoutDuration.Value())}
 	// Request-wide middleware runs before route-specific authentication, CSRF and audit guards.
 	engine.Use(s.bodyLimit(), s.requestID(), s.recovery(), s.proxy(), s.securityHeaders(), s.accessLog(), s.rateLimit())
@@ -90,6 +94,7 @@ func New(cfg *config.Config, web fs.FS, recorder *audit.Recorder, logger *slog.L
 	protected.Use(s.requireSession())
 	protected.GET("/session", s.session)
 	protected.POST("/logout", s.requireCSRF(), s.auditReady(), s.logout)
+	protected.POST("/password", s.requireCSRF(), s.auditReady(), s.changePassword)
 	system := engine.Group("/api/v1/system")
 	system.Use(s.requireSession())
 	system.GET("/status", s.systemStatus)

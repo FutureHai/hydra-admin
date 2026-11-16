@@ -16,6 +16,8 @@ go build -o "$temp_dir/hydra-admin" ./cmd/hydra-admin
 go build -o "$temp_dir/mock-hydra" ./tests/e2e/mockhydra
 go build -o "$temp_dir/proxy" ./tests/e2e/proxy
 cp tests/e2e/config.yaml "$temp_dir/config.yaml"
+install -d -m 0700 "$temp_dir/state"
+install -m 0600 tests/fixtures/password.hash "$temp_dir/state/password.hash"
 "$temp_dir/mock-hydra" >"$temp_dir/mock.out" 2>&1 & mock_pid=$!
 for i in {1..50}; do
   if [[ "$(curl -fsS http://127.0.0.1:14445/__fixture 2>/dev/null || true)" == hydra-admin-e2e-mock ]]; then break; fi
