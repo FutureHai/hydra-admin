@@ -79,7 +79,7 @@ var WritableSchema = []WritableField{
 	{Name: "post_logout_redirect_uris", Kind: "array"},
 	{Name: "allowed_cors_origins", Kind: "array"},
 	{Name: "token_endpoint_auth_method", Kind: "select", Options: []string{"client_secret_basic", "client_secret_post", "none"}},
-	{Name: "access_token_strategy", Kind: "select", Options: []string{"opaque", "jwt"}, Help: "可选；留空沿用 Hydra 全局策略。选择 jwt 前请确认 Hydra 的 JWKS 与签名密钥可用，且下游支持 JWT Access Token。"},
+	{Name: "access_token_strategy", Kind: "select", Options: []string{"opaque", "jwt"}, Help: "选择沿用全局策略时，由 Hydra 实例决定 Token 格式。切换为 JWT 前请确认下游支持 JWT 验签。"},
 	{Name: "owner", Kind: "text"},
 	{Name: "contacts", Kind: "array"},
 	{Name: "client_uri", Kind: "text"},
@@ -108,7 +108,7 @@ var WritableSchema = []WritableField{
 }
 
 func createOnlyField(name string) bool {
-	return name == "client_id" || name == "access_token_strategy" || contains(clientLifespanFields, name)
+	return name == "client_id" || contains(clientLifespanFields, name)
 }
 
 func WritableNames(create bool) []string {
@@ -145,7 +145,9 @@ func ValidateFields(fields map[string]json.RawMessage, create bool) *ReadError {
 			if name == "client_id" && !validClientID(s) {
 				return readFailure(422, "validation_failed")
 			}
-			if f.Kind == "select" && !contains(f.Options, s) {
+			// Hydra treats an empty strategy as an explicit reset when patching.
+			resetStrategy := !create && name == "access_token_strategy" && s == ""
+			if f.Kind == "select" && !resetStrategy && !contains(f.Options, s) {
 				return readFailure(422, "validation_failed")
 			}
 			if (name == "frontchannel_logout_uri" || name == "backchannel_logout_uri") && s != "" && !validClientLogoutURI(s) {
@@ -329,11 +331,12 @@ func (a *HTTPAdapter) PatchClient(ctx context.Context, id, baseline string, chan
 		if json.Unmarshal(value, &decoded) != nil {
 			return ClientRead{}, readFailure(422, "validation_failed")
 		}
-		if old, exists := current.Fields[f.Name]; exists && bytes.Equal(old, value) {
+		old, exists := current.Fields[f.Name]
+		if bytes.Equal(old, value) || (f.Name == "access_token_strategy" && string(value) == `""` && (!exists || string(old) == "null")) {
 			continue
 		}
 		op := "add"
-		if _, exists := current.Fields[f.Name]; exists {
+		if exists {
 			op = "replace"
 		}
 		patch = append(patch, map[string]any{"op": op, "path": "/" + f.Name, "value": decoded})

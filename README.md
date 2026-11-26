@@ -21,7 +21,7 @@ Go + React 管理台，用于管理 ORY Hydra Client，并查看 Scope、Audienc
 可管理 Client，查看从 Client 聚合的 Scope 和 Audience，按已确认能力使用 Token 内省/吊销，并按时间、动作、Client ID 查看审计记录。审计查询每批最多扫描 8 MiB，可通过游标继续查找更早记录；归档仍受 `max_archives` 保留数量限制。支持多个共用 Hydra 数据的 Admin 副本及各副本状态展示。管理员可在页面修改密码；修改后所有会话退出。可配置 Audience 与 Scope 预设、登录锁定、会话时长、API 限流和日志/审计轮转；完整字段及默认值见 [示例配置](configs/config.example.yaml)。
 
 - Client 列表使用 Hydra 游标分页，每页 10 条；Scope / Audience 每次读取最多 100 个 Client，可逐批继续读取并聚合，直到 Hydra 返回末页。读取期间 Client 变化可能影响结果。
-- 可在 Client 详情编辑高级授权/登出设置，并独立调整 Token 有效期；替换整个 Client 的 PUT 和 Secret 轮换关闭。Token 操作按能力探测及配置显示。
+- 可在 Client 详情查看和修改 Access Token 策略（JWT、Opaque 或沿用 Hydra 全局策略），编辑高级授权和登出设置，并独立调整 Token 有效期。切换策略前请确认下游支持新签发的 Token 格式。替换整个 Client 的 PUT 和 Secret 轮换关闭；Token 操作按能力探测及配置显示。
 - 状态页展示 Hydra 运行版本和当前可用能力；部署前应在目标环境验证所需操作。详见 [开发基准与能力](SUPPORTED_HYDRA_VERSIONS.md)。
 
 多副本探测读取版本信息，并验证健康与 Client 列表可读；无法证明各副本使用同一数据库、issuer 和签名密钥。配置前需在 Hydra 部署侧核对这些值；若不一致，只配置一个副本。当前管理台的登录会话、限流和同一 Client 写入锁均在单进程内，多个 `hydra-admin` 进程不能作为一个共享会话集群直接部署。

@@ -81,6 +81,32 @@ it('does not prefill redacted Metadata into the edit form', async () => {
   expect(screen.getByText(/编辑框不会回填它/)).toBeInTheDocument()
 })
 
+it.each([
+  { current: 'opaque', before: 'Opaque', after: 'JWT', wire: 'jwt' },
+  { current: 'jwt', before: 'JWT', after: '沿用 Hydra 全局策略', wire: '' },
+  { current: undefined, before: '沿用 Hydra 全局策略', after: 'Opaque', wire: 'opaque' },
+])('shows the current strategy and submits $before → $after', async ({ current, before, after, wire }) => {
+  getClient.mockResolvedValue({
+    client: { client_id: 'strategy-test', fields: current ? { access_token_strategy: current } : {} },
+    revision: 'baseline', editable_fields: ['access_token_strategy'], capabilities: { client_update: { enabled: true } },
+    writable_schema: [{ name: 'access_token_strategy', kind: 'select', options: ['opaque', 'jwt'] }],
+  })
+  patchClient.mockResolvedValue({})
+  render(<MemoryRouter initialEntries={['/clients/strategy-test']}><Routes><Route path="/clients/:clientId" element={<SpecClientDetail />} /></Routes></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('tab', { name: '授权与认证' }))
+  expect(screen.getByText('Access Token 策略')).toBeInTheDocument()
+  expect(screen.getByText(before)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /编\s*辑/ }))
+  expect(screen.getByTitle(before)).toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Access Token 策略' }))
+  fireEvent.click(await screen.findByTitle(after))
+  fireEvent.click(screen.getByRole('button', { name: '检查修改摘要' }))
+  expect(await screen.findByText(`${before} → ${after}`)).toBeInTheDocument()
+  expect(patchClient).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '提交 JSON Patch' }))
+  await waitFor(() => expect(patchClient).toHaveBeenCalledWith('strategy-test', 'baseline', { access_token_strategy: wire }))
+})
+
 it('edits advanced consent and logout fields through JSON Patch', async () => {
   getClient.mockResolvedValue({
     client: { client_id: 'advanced-edit', fields: { grant_types: ['client_credentials'], skip_consent: false, backchannel_logout_uri: 'https://example.invalid/logout' } },

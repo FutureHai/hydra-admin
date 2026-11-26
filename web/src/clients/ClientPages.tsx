@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Machine, ReasonBlock } from '../spec/SpecApp'
 import { PageHeading, reasonLabel } from '../spec/SpecOverview'
 import { clientErrorMessage, deleteClient, getClient, listClients, patchClient, setClientLifespans, textArrayField, textField, type ClientDetailResponse, type ClientRead } from './api'
-import { ClientFieldSections, FieldList, fieldLabel, parseMetadataInput, sameHydraDuration, Summary } from './ClientWritePages'
+import { accessTokenStrategyLabel, ClientFieldSections, FieldList, fieldLabel, parseMetadataInput, sameHydraDuration, Summary } from './ClientWritePages'
 import { sameScopes, scopeTokens, scopeWireValue } from './resourceAccess'
 
 const dash = '—'
@@ -147,9 +147,14 @@ export function SpecClientDetail() {
   const configuredAdvanced = [...advancedNames, ...(detail?.writable_schema ?? []).filter(field => field.kind === 'duration').map(field => field.name)]
     .filter(name => client.fields[name] !== undefined && client.fields[name] !== null)
   function beginEdit(advanced = false) {
+    if (!client) return
     const values: Record<string, unknown> = {}
     for (const field of editable) {
-      if (client?.fields[field.name] == null) continue
+      if (field.name === 'access_token_strategy') {
+        values[field.name] = client.fields[field.name] ?? ''
+        continue
+      }
+      if (client.fields[field.name] == null) continue
       if (field.name === 'metadata') {
         if (!metadataRedacted) values.metadata = JSON.stringify(client.fields.metadata, null, 2)
       } else values[field.name] = field.name === 'scope' ? scopeTokens(client.fields[field.name]) : field.kind === 'boolean' && typeof client.fields[field.name] === 'boolean' ? String(client.fields[field.name]) : client.fields[field.name]
@@ -161,7 +166,9 @@ export function SpecClientDetail() {
     const changes: Record<string, unknown> = {}
     for (const field of editable) {
       const value = values[field.name]
-      if (field.name === 'scope') {
+      if (field.name === 'access_token_strategy') {
+        if (typeof value === 'string' && value !== (client.fields[field.name] ?? '')) changes[field.name] = value
+      } else if (field.name === 'scope') {
         if (value !== undefined && !sameScopes(value, client?.fields.scope)) changes.scope = scopeWireValue(value)
       } else if (field.name === 'metadata') {
         if (typeof value === 'string' && value.trim()) {
@@ -228,7 +235,12 @@ export function SpecClientDetail() {
 
   const tabs = [
     { key: 'basic', label: '基本信息', children: <div className="spec-detail-list"><DetailRow label="Client Id" value={<Machine>{client.client_id}</Machine>} /><DetailRow label="Client名称" value={textField(client, 'client_name')} /><DetailRow label="Owner" value={textField(client, 'owner')} /><DetailRow label="状态" value={dash} /></div> },
-    { key: 'auth', label: '授权与认证', children: <div className="spec-detail-list"><DetailRow label="Grant types" value={tags(textArrayField(client, 'grant_types'))} /><DetailRow label="Response types" value={tags(textArrayField(client, 'response_types'))} /><DetailRow label="认证方式" value={textField(client, 'token_endpoint_auth_method')} /></div> },
+    { key: 'auth', label: '授权与认证', children: <div className="spec-detail-list">
+      <DetailRow label="Grant types" value={tags(textArrayField(client, 'grant_types'))} />
+      <DetailRow label="Response types" value={tags(textArrayField(client, 'response_types'))} />
+      <DetailRow label="认证方式" value={textField(client, 'token_endpoint_auth_method')} />
+      <DetailRow label={fieldLabel('access_token_strategy')} value={accessTokenStrategyLabel(client.fields.access_token_strategy)} />
+    </div> },
     { key: 'uris', label: 'Redirect URIs & CORS', children: <div className="spec-detail-list"><DetailRow label="Redirect URIs" value={tags(textArrayField(client, 'redirect_uris'))} /><DetailRow label="CORS origins" value={tags(textArrayField(client, 'allowed_cors_origins'))} /><DetailRow label="JWKS URI" value={textField(client, 'jwks_uri')} /></div> },
     { key: 'scope', label: 'Scope & Audience', children: <div className="spec-detail-list"><DetailRow label="Scope" value={<Machine>{textField(client, 'scope') ?? dash}</Machine>} /><DetailRow label="Audience" value={tags(textArrayField(client, 'audience'))} /></div> },
     { key: 'advanced', label: '高级配置', children: <>
@@ -254,7 +266,9 @@ export function SpecClientDetail() {
       <Form form={form} layout="vertical" className="spec-client-form" onFinish={reviewEdit}><ClientFieldSections schema={editable} resourceCatalog={detail?.resource_catalog} openAdvanced={editAdvanced} /></Form>
     </Modal>
     <Modal title="确认保存修改" open={preview !== null} onCancel={() => setPreview(null)} onOk={() => void saveEdit()} okText="提交 JSON Patch" confirmLoading={saving} destroyOnHidden>
-      <p>只提交以下显式修改的字段；不会提交 client_secret。</p>{preview && <Summary fields={preview} resourceCatalog={detail?.resource_catalog} current={client} />}
+      <p>只提交以下显式修改的字段；不会提交 client_secret。</p>
+      {preview && 'access_token_strategy' in preview && <Alert type="warning" showIcon title="修改会影响新签发的 Access Token 格式。请确认下游支持切换后的格式。" className="spec-inline-alert" />}
+      {preview && <Summary fields={preview} resourceCatalog={detail?.resource_catalog} current={client} />}
     </Modal>
     <Modal title="调整 Token 有效期" className="spec-edit-modal" open={lifespanOpen} onCancel={() => setLifespanOpen(false)} destroyOnHidden width={860}
       footer={<><Button onClick={() => setLifespanOpen(false)}>取消</Button><Button type="primary" onClick={() => lifespanForm.submit()}>检查有效期修改</Button></>}>

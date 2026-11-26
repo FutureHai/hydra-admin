@@ -111,10 +111,10 @@ it('offers the versioned access token strategy without preselecting an override'
     { name: 'access_token_strategy', kind: 'select', options: ['opaque', 'jwt'], help: '留空沿用 Hydra 全局策略。' },
   ]} /></Form>)
   expect(screen.getByRole('heading', { name: '授权与令牌' })).toBeInTheDocument()
-  expect(screen.getByText('沿用实例默认策略')).toBeInTheDocument()
+  expect(screen.getByTitle('沿用 Hydra 全局策略')).toBeInTheDocument()
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Access Token 策略' }))
-  expect(await screen.findByTitle('opaque')).toBeInTheDocument()
-  expect(screen.getByTitle('jwt')).toBeInTheDocument()
+  expect(await screen.findByTitle('Opaque')).toBeInTheDocument()
+  expect(screen.getByTitle('JWT')).toBeInTheDocument()
 })
 
 it('groups only the fields allowed by the edit schema', () => {

@@ -167,7 +167,7 @@ func TestVersion26ClientCreateSchema(t *testing.T) {
 	}
 }
 
-func TestAccessTokenStrategyCreateOnly(t *testing.T) {
+func TestAccessTokenStrategyCreateAndUpdate(t *testing.T) {
 	var strategyField *WritableField
 	for i := range WritableSchema {
 		if WritableSchema[i].Name == "access_token_strategy" {
@@ -178,8 +178,8 @@ func TestAccessTokenStrategyCreateOnly(t *testing.T) {
 	if strategyField == nil || strategyField.Kind != "select" || len(strategyField.Options) != 2 || !contains(strategyField.Options, "opaque") || !contains(strategyField.Options, "jwt") {
 		t.Fatal("access token strategy is not an explicit two-option create field")
 	}
-	if contains(WritableNames(false), "access_token_strategy") || !contains(WritableNames(true), "access_token_strategy") {
-		t.Fatal("access token strategy leaked into editable fields or is absent from create")
+	if !contains(WritableNames(false), "access_token_strategy") || !contains(WritableNames(true), "access_token_strategy") {
+		t.Error("access token strategy must be present in the create and edit schemas")
 	}
 	fields := map[string]json.RawMessage{
 		"client_id":   mustJSON("strategy-test"),
@@ -188,18 +188,21 @@ func TestAccessTokenStrategyCreateOnly(t *testing.T) {
 	if err := ValidateFields(fields, true); err != nil {
 		t.Fatal("omitted strategy must inherit the Hydra global setting")
 	}
-	for _, value := range []string{"opaque", "jwt"} {
-		fields["access_token_strategy"] = mustJSON(value)
-		if err := ValidateFields(fields, true); err != nil {
-			t.Fatalf("supported strategy %s rejected: %s", value, err.Code)
+	for _, tc := range []struct {
+		value             any
+		createOK, patchOK bool
+	}{
+		{"opaque", true, true}, {"jwt", true, true}, {"", false, true},
+		{"unsupported", false, false}, {nil, false, false},
+	} {
+		raw := mustJSON(tc.value)
+		fields["access_token_strategy"] = raw
+		if err := ValidateFields(fields, true); (err == nil) != tc.createOK {
+			t.Errorf("create strategy %v: %v", tc.value, err)
 		}
-	}
-	fields["access_token_strategy"] = mustJSON("unsupported")
-	if err := ValidateFields(fields, true); err == nil || err.Status != http.StatusUnprocessableEntity {
-		t.Fatal("unknown access token strategy accepted")
-	}
-	if err := ValidateFields(map[string]json.RawMessage{"access_token_strategy": mustJSON("jwt")}, false); err == nil || err.Status != http.StatusUnprocessableEntity {
-		t.Fatal("strategy update bypassed create-only gate")
+		if err := ValidateFields(map[string]json.RawMessage{"access_token_strategy": raw}, false); (err == nil) != tc.patchOK {
+			t.Errorf("edit strategy %v: %v", tc.value, err)
+		}
 	}
 }
 

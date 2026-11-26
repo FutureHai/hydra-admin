@@ -32,6 +32,13 @@ export function fieldLabel(name: string) {
   return fieldLabels[name] ?? name.replaceAll('_', ' ')
 }
 
+export function accessTokenStrategyLabel(value: unknown): string {
+  if (value == null || value === '') return '沿用 Hydra 全局策略'
+  if (value === 'jwt') return 'JWT'
+  if (value === 'opaque') return 'Opaque'
+  return typeof value === 'string' ? value : '—'
+}
+
 function hydraDurationNanos(value: unknown): bigint | null {
   if (typeof value !== 'string' || value.length > 64 || !/^([0-9]+(ns|us|ms|s|m|h))+$/.test(value)) return null
   const nanos: Record<string, bigint> = { ns: 1n, us: 1000n, ms: 1000000n, s: 1000000000n, m: 60000000000n, h: 3600000000000n }
@@ -68,7 +75,13 @@ type FieldControlProps = {
 }
 
 export function FieldControl({ field, create = false, id, value, onChange }: FieldControlProps) {
-  if (field.kind === 'select') return <Select id={id} value={value as string | undefined} onChange={onChange} allowClear={!field.required} placeholder={field.name === 'access_token_strategy' ? '沿用实例默认策略' : undefined} options={field.options?.map(item => ({ label: item, value: item }))} />
+  if (field.kind === 'select') {
+    if (field.name === 'access_token_strategy') {
+      const options = ['', ...(field.options ?? [])].map(item => ({ label: accessTokenStrategyLabel(item), value: item }))
+      return <Select id={id} value={typeof value === 'string' ? value : ''} onChange={onChange} options={options} />
+    }
+    return <Select id={id} value={value as string | undefined} onChange={onChange} allowClear={!field.required} options={field.options?.map(item => ({ label: item, value: item }))} />
+  }
   if (field.kind === 'boolean') return <Select id={id} value={value as string | undefined} onChange={onChange} allowClear={create} placeholder="使用 Hydra 默认值" options={[{ label: '开启', value: 'true' }, { label: '关闭', value: 'false' }]} />
   if (field.name === 'scope') return <Select id={id} value={value as string[] | undefined} onChange={onChange} mode="tags" tokenSeparators={[' ', ',', '\n']} placeholder="输入 Scope 后按 Enter 添加" />
   if (field.kind === 'array') return <Select id={id} value={value as string[] | undefined} onChange={onChange} mode={field.options?.length ? 'multiple' : 'tags'} tokenSeparators={[',', '\n']} options={field.options?.map(item => ({ label: item, value: item }))} placeholder="输入后按 Enter 添加" />
@@ -137,7 +150,11 @@ export function Summary({ fields, resourceCatalog, current }: { fields: Record<s
   const unmatched = showAccess ? unmatchedScopes(scopes, audiences ?? [], resourceCatalog!) : []
   const listedAudiences = new Set(resourceCatalog?.audiences?.map(resource => resource.audience) ?? [])
   const unknownAudiences = audiences?.filter(audience => !listedAudiences.has(audience)) ?? []
-  return <><div className="spec-detail-list">{Object.entries(fields).map(([name, value]) => <div className="spec-detail-row" key={name}><span>{fieldLabel(name)}</span><div className="spec-detail-value">{name === 'metadata' ? <pre className="spec-summary-json">{JSON.stringify(value, null, 2)}</pre> : <Typography.Text code>{value === null && name.endsWith('_lifespan') ? '恢复 Hydra 默认值' : Array.isArray(value) ? value.join(', ') : typeof value === 'boolean' ? value ? '开启' : '关闭' : String(value)}</Typography.Text>}</div></div>)}</div>
+  return <><div className="spec-detail-list">{Object.entries(fields).map(([name, value]) => <div className="spec-detail-row" key={name}><span>{fieldLabel(name)}</span><div className="spec-detail-value">
+    {name === 'access_token_strategy' ? <Typography.Text code>{current ? `${accessTokenStrategyLabel(current.fields[name])} → ` : ''}{accessTokenStrategyLabel(value)}</Typography.Text>
+      : name === 'metadata' ? <pre className="spec-summary-json">{JSON.stringify(value, null, 2)}</pre>
+        : <Typography.Text code>{value === null && name.endsWith('_lifespan') ? '恢复 Hydra 默认值' : Array.isArray(value) ? value.join(', ') : typeof value === 'boolean' ? value ? '开启' : '关闭' : String(value)}</Typography.Text>}
+  </div></div>)}</div>
     {showAccess && <div className="spec-resource-preview"><strong>按资源查看最终配置</strong>
       {(resourceCatalog!.audiences ?? []).filter(resource => audiences?.includes(resource.audience)).map(resource => <p key={resource.audience}><Typography.Text code>{resource.audience}</Typography.Text>：{scopes.filter(scope => resource.scopes.includes(scope)).join('、') || '未选 Scope'}</p>)}
       {(resourceCatalog!.global_scopes ?? []).some(scope => scopes.includes(scope)) && <p>通用 Scope：{scopes.filter(scope => resourceCatalog!.global_scopes?.includes(scope)).join('、')}</p>}

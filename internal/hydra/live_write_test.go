@@ -345,12 +345,12 @@ func TestLiveHydraImplicitClientCreate(t *testing.T) {
 	}
 }
 
-// Opt-in v26.2.0 proof: a per-Client JWT override round-trips and mints a JWT.
+// Opt-in v26.2.0 proof: strategy changes affect issuance, and reset restores the instance default.
 // The test owns one random Client and never prints its Secret or Token.
-func TestLiveHydraClientJWTStrategy(t *testing.T) {
+func TestLiveHydraClientAccessTokenStrategy(t *testing.T) {
 	adminURL, publicURL := os.Getenv("HYDRA_ADMIN_TEST_URL"), os.Getenv("HYDRA_PUBLIC_TEST_URL")
 	if adminURL == "" || publicURL == "" {
-		t.Skip("set both Hydra test URLs for isolated JWT strategy test")
+		t.Skip("set both Hydra test URLs for isolated Access Token strategy test")
 	}
 	adapter, err := NewHTTPAdapter(adminURL, 5*time.Second)
 	if err != nil {
@@ -364,21 +364,24 @@ func TestLiveHydraClientJWTStrategy(t *testing.T) {
 	if _, err := rand.Read(random[:]); err != nil {
 		t.Fatal(err)
 	}
-	id := "codex-jwt-strategy-test-" + hex.EncodeToString(random[:])
+	id := "codex-token-strategy-test-" + hex.EncodeToString(random[:])
 	if _, readErr := adapter.GetClient(ctx, id); readErr == nil || readErr.Status != http.StatusNotFound {
 		t.Fatal("random test ID is not free")
 	}
 	created, writeErr := adapter.CreateClient(ctx, map[string]json.RawMessage{
 		"client_id": mustJSON(id), "grant_types": mustJSON([]string{"client_credentials"}),
 		"token_endpoint_auth_method": mustJSON("client_secret_basic"),
-		"access_token_strategy":      mustJSON("jwt"),
 	})
 	if writeErr != nil {
-		t.Fatalf("JWT Client create failed: %s", writeErr.Code)
+		t.Fatalf("test Client create failed: %s", writeErr.Code)
 	}
 	defer func() {
 		if err := adapter.DeleteClient(context.Background(), id); err != nil {
-			t.Errorf("isolated JWT Client cleanup failed: %s", err.Code)
+			t.Errorf("test Client cleanup failed: %s", err.Code)
+			return
+		}
+		if _, err := adapter.GetClient(context.Background(), id); err == nil || err.Status != http.StatusNotFound {
+			t.Error("test Client remained after cleanup")
 		}
 	}()
 	if created.Secret == "" {
@@ -386,41 +389,72 @@ func TestLiveHydraClientJWTStrategy(t *testing.T) {
 	}
 	secret := created.Secret
 	created.Secret = ""
-	client, readErr := adapter.GetClient(ctx, id)
-	if readErr != nil || string(client.Fields["access_token_strategy"]) != `"jwt"` {
-		t.Fatal("JWT strategy did not round-trip")
-	}
 	public, err := NewHTTPAdapter(publicURL, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	u := *public.base
 	u.Path = strings.TrimRight(public.base.Path, "/") + "/oauth2/token"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(url.Values{"grant_type": {"client_credentials"}}.Encode()))
-	if err != nil {
-		t.Fatal(err)
+	issueFormat := func(t *testing.T) string {
+		t.Helper()
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(url.Values{"grant_type": {"client_credentials"}}.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.SetBasicAuth(id, secret)
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response, err := public.client.Do(request)
+		if err != nil {
+			t.Fatal("test token request failed")
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("test token endpoint status %d", response.StatusCode)
+		}
+		var tokenResponse struct {
+			AccessToken string `json:"access_token"`
+		}
+		if json.NewDecoder(io.LimitReader(response.Body, 65536)).Decode(&tokenResponse) != nil || tokenResponse.AccessToken == "" {
+			t.Fatal("test token response invalid")
+		}
+		if strings.Count(tokenResponse.AccessToken, ".") == 2 {
+			return "jwt"
+		}
+		return "opaque"
 	}
-	request.SetBasicAuth(id, secret)
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := public.client.Do(request)
-	if err != nil {
-		t.Fatal("test token request failed")
+	client, readErr := adapter.GetClient(ctx, id)
+	if readErr != nil || len(client.Fields["access_token_strategy"]) != 0 {
+		t.Fatal("new Client should inherit the global strategy")
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("test token endpoint status %d", response.StatusCode)
+	defaultFormat := issueFormat(t)
+	t.Logf("Hydra global strategy minted %s", defaultFormat)
+	if _, err := adapter.PatchClient(ctx, id, client.Revision(), map[string]json.RawMessage{"access_token_strategy": mustJSON("")}); err == nil || err.Code != "no_changes" {
+		t.Fatal("resetting an already inherited strategy should be a no-op")
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 65537))
-	if err != nil || len(data) > 65536 {
-		t.Fatal("test token response invalid")
+	for _, step := range []struct{ name, override, format string }{
+		{"opaque", "opaque", "opaque"}, {"jwt", "jwt", "jwt"}, {"inherit", "", defaultFormat},
+	} {
+		_, patchErr := adapter.PatchClient(ctx, id, client.Revision(), map[string]json.RawMessage{
+			"access_token_strategy": mustJSON(step.override),
+		})
+		if patchErr != nil {
+			t.Fatalf("%s: strategy PATCH failed: %s", step.name, patchErr.Code)
+		}
+		client, readErr = adapter.GetClient(ctx, id)
+		expected := ""
+		if step.override != "" {
+			expected = string(mustJSON(step.override))
+		}
+		if readErr != nil || string(client.Fields["access_token_strategy"]) != expected {
+			t.Fatalf("%s: strategy did not round-trip through GET", step.name)
+		}
+		t.Logf("%s: PATCH persisted and GET confirmed the strategy", step.name)
+		t.Run(step.name+"_issuance", func(t *testing.T) {
+			if actual := issueFormat(t); actual != step.format {
+				t.Fatalf("issued %s, want %s", actual, step.format)
+			}
+		})
 	}
-	var tokenResponse struct {
-		AccessToken string `json:"access_token"`
-	}
-	if json.Unmarshal(data, &tokenResponse) != nil || strings.Count(tokenResponse.AccessToken, ".") != 2 {
-		t.Fatal("per-Client JWT strategy did not mint a compact JWT")
-	}
-	tokenResponse.AccessToken = ""
 }
 
 // Opt-in proof of the real Link cursor. Owns and removes one isolated Client.
