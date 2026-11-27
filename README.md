@@ -261,39 +261,50 @@ Nginx 在其他服务器时，将 `bind_address` 改为管理台的可达内网 
 
 ## Linux systemd 后台运行
 
-以下命令在**已解压并配置好的 Linux 发布包目录**执行，适用于使用 `systemd` 的发行版。先完成上面的密码、Hydra 地址和管理台 URL 配置，并确认 `./hydra-admin check --config ./config.yaml` 通过。示例把程序装在 `/opt/hydra-admin`，以专用用户运行；`audit.path` 和 `log.path` 保持示例配置中的 `./logs/...`，`auth.password_hash_file` 保持 `./state/password.hash`。
+`/opt/hydra-admin` 是指向当前版本的软链接。真实目录保留发布包的解压名称，例如 `/opt/hydra-admin-v2.0.1-linux-amd64`。每个版本保留自己的 `config.yaml` 和 `state/password.hash`。应用日志、审计记录及轮转归档写入当前版本的 `./logs/`。
+
+### 初次安装
+
+按[二进制包下载步骤](#linux)校验压缩包和解压文件，再按[配置并启动](#配置并启动)在解压目录准备 `config.yaml` 和 `state/password.hash`。在包含压缩包和解压目录的下载目录用 Bash 运行以下命令，将 `package` 改成实际的解压目录名称。已有安装的主机使用下方的迁移或升级步骤。
+
+在 `sudoedit` 打开的部署配置中使用以下路径。相对路径以 `config.yaml` 所在的版本目录为基准。
+
+| 配置字段 | 路径 |
+| --- | --- |
+| `auth.password_hash_file` | `./state/password.hash` |
+| `audit.path` | `./logs/audit.jsonl` |
+| `log.path` | `./logs/hydra-admin.log` |
 
 ```bash
-if ! getent group hydra-admin >/dev/null 2>&1; then
-  sudo groupadd --system hydra-admin
-fi
-if ! id hydra-admin >/dev/null 2>&1; then
-  sudo useradd --system --gid hydra-admin --no-create-home --home-dir /opt/hydra-admin --shell /usr/sbin/nologin hydra-admin
-fi
-sudo install -d -m 0755 -o root -g root /opt/hydra-admin
-if [ ./hydra-admin -ef /opt/hydra-admin/hydra-admin ]; then
-  # 发布包已直接解压到 /opt/hydra-admin，无须复制文件到自身。
-  sudo chown root:root ./hydra-admin
-  sudo chmod 0755 ./hydra-admin
-  sudo chown hydra-admin:hydra-admin ./config.yaml
-  sudo chmod 0600 ./config.yaml
-else
-  sudo install -m 0755 -o root -g root ./hydra-admin /opt/hydra-admin/hydra-admin
-  sudo install -m 0600 -o hydra-admin -g hydra-admin ./config.yaml /opt/hydra-admin/config.yaml
-  sudo cp -R ./LICENSE ./SUPPORTED_HYDRA_VERSIONS.md ./THIRD_PARTY_NOTICES.md ./licenses /opt/hydra-admin/
-fi
-sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/logs
-sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/state
-if [ ./state/password.hash -ef /opt/hydra-admin/state/password.hash ]; then
-  sudo chown hydra-admin:hydra-admin ./state/password.hash
-  sudo chmod 0600 ./state/password.hash
-else
-  sudo install -m 0600 -o hydra-admin -g hydra-admin ./state/password.hash /opt/hydra-admin/state/password.hash
-fi
-sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml'
+(
+  set -eu
+  package=hydra-admin-v2.0.1-linux-amd64
+  release="/opt/$package"
+  for install_path in /opt/hydra-admin "$release"; do
+    if sudo test -e "$install_path" || sudo test -L "$install_path"; then
+      echo "路径已存在：$install_path，请先确认已有安装或数据。" >&2
+      exit 1
+    fi
+  done
+  test -s "$package/config.yaml"
+  test -s "$package/state/password.hash"
+  if ! getent group hydra-admin >/dev/null 2>&1; then
+    sudo groupadd --system hydra-admin
+  fi
+  if ! id hydra-admin >/dev/null 2>&1; then
+    sudo useradd --system --gid hydra-admin --no-create-home --home-dir /opt/hydra-admin --shell /usr/sbin/nologin hydra-admin
+  fi
+  sudo mkdir -p /opt
+  sudo tar -xkzf "$package.tar.gz" -C /opt
+  sudo install -d -m 0700 -o hydra-admin -g hydra-admin "$release/state" "$release/logs"
+  sudo install -m 0600 -o hydra-admin -g hydra-admin "$package/state/password.hash" "$release/state/password.hash"
+  sudo install -m 0640 -o root -g hydra-admin "$package/config.yaml" "$release/config.yaml"
+  sudoedit "$release/config.yaml"
+  sudo ln -sT -- "$package" /opt/hydra-admin
+)
 ```
 
-创建 `/etc/systemd/system/hydra-admin.service`：
+用 `sudoedit /etc/systemd/system/hydra-admin.service` 创建服务文件：
 
 ```ini
 [Unit]
@@ -314,51 +325,167 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/opt/hydra-admin/logs /opt/hydra-admin/state
+ReadWritePaths=/opt/hydra-admin/state /opt/hydra-admin/logs
 UMask=0077
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`UMask=0077` 与配置中的 `audit.file_mode`、`log.file_mode: "0600"` 相容。若修改日志、审计或密码状态文件路径，要同步调整 `ReadWritePaths` 和目录权限。保存服务文件后执行：
+`ReadWritePaths` 允许服务在 `ProtectSystem=strict` 下写入当前版本的 `state/` 和 `logs/`。安装命令会准备这两个目录，权限为 `0700`。应用会在启动时创建缺失的日志和审计文件，权限为 `0600`。
+
+安装、升级和回滚前，按目标版本 `config.yaml` 的 `server.bind_address` 和 `server.port` 填写命令中的 `ready_url`。使用 HTTP 直连应用端口，IPv6 地址用方括号括起。监听所有地址时，填写本机可达的 IP。保存服务文件后执行：
 
 ```bash
-sudo systemd-analyze verify /etc/systemd/system/hydra-admin.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now hydra-admin
-sudo systemctl status hydra-admin --no-pager
-curl -f http://127.0.0.1:8085/healthz  # bind_address 为内网 IP 时，改用该 IP
+(
+  set -eu
+  ready_url='http://127.0.0.1:8085/readyz'  # 按目标版本配置填写实际 IP 和端口
+  sudo systemd-analyze verify /etc/systemd/system/hydra-admin.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now hydra-admin
+  sudo systemctl status hydra-admin --no-pager
+  curl -fsS --noproxy '*' --retry 5 --retry-connrefused -- "$ready_url"
+)
 ```
 
-用 `sudo journalctl -u hydra-admin -n 100 --no-pager` 查看启动错误；应用日志和审计记录写入 `/opt/hydra-admin/logs/`。修改配置或更换二进制后运行 `sudo systemctl restart hydra-admin`。监听地址与浏览器入口按上面的访问方式配置；Hydra Admin API 应保持在受限网络内。
+用 `sudo journalctl -u hydra-admin -n 100 --no-pager` 查看启动错误。可通过 `/opt/hydra-admin/logs/` 查看当前版本的应用日志、审计记录和归档。修改当前版本配置后运行 `sudo systemctl restart hydra-admin`。监听地址与浏览器入口按上面的访问方式配置，Hydra Admin API 应保持在受限网络内。
+
+服务启动后，可执行 `sudo -u hydra-admin /opt/hydra-admin/hydra-admin check --config /opt/hydra-admin/config.yaml` 检查本地路径和 Hydra 的只读连通性。
+
+### 迁移旧安装
+
+从实体安装目录迁移为软链接，或从旧的绝对日志路径迁回版本目录时，执行以下步骤。`package` 填当前版本原来的解压目录名称。若当前配置把日志和审计写到同一个外部目录（例如先前配置的 `/var/log/hydra-admin`），将 `legacy_logs` 设为该目录的绝对路径。已经写入当前版本 `logs/` 时留空。密码文件继续使用当前版本的 `state/password.hash`。
+
+```bash
+(
+  set -eu
+  package=hydra-admin-v2.0.1-linux-amd64
+  release="/opt/$package"
+  legacy_logs=
+  current=$(readlink -e /opt/hydra-admin)
+  sudo test -s "$current/state/password.hash"
+  if [ -n "$legacy_logs" ]; then
+    legacy_logs=$(sudo readlink -e -- "$legacy_logs")
+    sudo test -d "$legacy_logs"
+    test "$legacy_logs" != "$current/logs"
+  fi
+  if [ "$current" != "$release" ]; then
+    test "$current" = /opt/hydra-admin
+    sudo test ! -e "$release"
+    sudo test ! -L "$release"
+  fi
+  sudo systemctl stop hydra-admin
+  sudo cp -an -- "$current/config.yaml" "$current/config.yaml.before-migration"
+  if [ "$current" != "$release" ]; then
+    sudo mv -T -- "$current" "$release"
+    sudo ln -sT -- "$package" /opt/hydra-admin
+  fi
+  if [ -n "$legacy_logs" ]; then
+    if sudo test -d "$release/logs"; then
+      saved_logs=$(sudo mktemp -d "$release/logs.before-migration.XXXXXX")
+      sudo mv -T -- "$release/logs" "$saved_logs/logs"
+      printf '原版本日志备份：%s\n' "$saved_logs"
+    fi
+    sudo cp -aT -- "$legacy_logs" "$release/logs"
+  fi
+  sudo install -d -m 0700 -o hydra-admin -g hydra-admin "$release/logs"
+  sudoedit "$release/config.yaml"
+)
+```
+
+在 `sudoedit` 打开的配置中应用上表的路径。将现有 unit 更新为上面的示例，并用 `sudo systemctl cat hydra-admin` 检查 drop-in，移除旧的 `LogsDirectory`、`LogsDirectoryMode` 和指向旧目录的 `ReadWritePaths` 条目。然后执行上面的 `systemd-analyze verify`、`daemon-reload` 和启动检查。迁移来源和迁移时生成的备份可继续保留。
 
 ## 升级回滚与卸载
 
-升级前从 [Release](https://github.com/FutureHai/hydra-admin/releases) 下载并校验新包，在**独立临时目录**解压，查看新版本说明及示例配置差异。保留现有 `config.yaml`、`state/`、日志与审计文件，先备份当前二进制、配置和密码状态目录，再停止服务、替换二进制并以服务用户运行 `check`：
+### 升级
+
+首次部署目标版本时，按[二进制包下载步骤](#linux)下载并校验新包，在压缩包所在目录运行以下命令。将 `package` 填为目标版本目录名称。目标目录已从校验过的发布包解压时，可直接重跑本段命令，沿用该目录的二进制和配置。新解压的版本沿用当前配置，在 `sudoedit` 中按目标版本要求调整，保留上表的路径。
+
+以服务用户运行的 `check` 通过后，才停服并再次复制密码文件，带上检查期间可能发生的密码修改。然后切换软链接，启动服务并检查 `/readyz`。各版本的日志、审计和轮转归档留在各自的 `logs/` 中。
+
+如果切换软链接后启动或 `/readyz` 检查失败，先[回滚](#回滚)到命令输出的上一版本，修正问题后再重试升级。
 
 ```bash
-sudo cp -p /opt/hydra-admin/hydra-admin /opt/hydra-admin/hydra-admin.previous
-sudo cp -p /opt/hydra-admin/config.yaml /opt/hydra-admin/config.yaml.previous
-sudo cp -a /opt/hydra-admin/state "/opt/hydra-admin/state.previous.$(date +%Y%m%d%H%M%S)"
-sudo systemctl stop hydra-admin
-sudo install -d -m 0700 -o hydra-admin -g hydra-admin /opt/hydra-admin/state
-# 当前目录应为新包的独立解压目录，不应是 /opt/hydra-admin
-sudo install -m 0755 -o root -g root ./hydra-admin /opt/hydra-admin/hydra-admin
-sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml' && sudo systemctl start hydra-admin
-sudo systemctl status hydra-admin --no-pager
+(
+  set -eu
+  package=hydra-admin-v2.0.2-linux-amd64
+  ready_url='http://127.0.0.1:8085/readyz'  # 按目标版本配置填写实际 IP 和端口
+  release="/opt/$package"
+  test -L /opt/hydra-admin
+  previous=$(readlink -e /opt/hydra-admin)
+  test "$previous" != "$release"
+  sudo test ! -L "$release"
+  if ! sudo test -e "$release"; then
+    sudo tar -xkzf "$package.tar.gz" -C /opt
+    sudo install -m 0640 -o root -g hydra-admin "$previous/config.yaml" "$release/config.yaml"
+  else
+    sudo test -f "$release/config.yaml"
+    sudo test ! -L "$release/config.yaml"
+    sudo chown root:hydra-admin "$release/config.yaml"
+    sudo chmod 0640 "$release/config.yaml"
+  fi
+  sudo test -d "$release"
+  sudo test -x "$release/hydra-admin"
+  sudoedit "$release/config.yaml"
+  sudo install -d -m 0700 -o hydra-admin -g hydra-admin "$release/state" "$release/logs"
+  sudo -u hydra-admin install -m 0600 "$previous/state/password.hash" "$release/state/password.hash"
+  sudo -u hydra-admin "$release/hydra-admin" check --config "$release/config.yaml"
+  printf '上一版本：%s\n' "$previous"
+
+  sudo systemctl stop hydra-admin
+  sudo -u hydra-admin install -m 0600 "$previous/state/password.hash" "$release/state/password.hash"
+  sudo ln -sfnT -- "$package" /opt/hydra-admin
+  sudo systemctl start hydra-admin
+  sudo systemctl status hydra-admin --no-pager
+  curl -fsS --noproxy '*' --retry 5 --retry-connrefused -- "$ready_url"
+)
 ```
 
-若配置格式需要调整，先备份再修改，并以新版本的 `check` 验证；不要假定旧配置始终兼容。升级失败时先停止服务，恢复对应版本的二进制及其配置备份，运行 `check` 后再启动：
+### 回滚
+
+将 `package` 填为升级时输出的上一版本目录名称，确认该目录中的 `config.yaml` 使用上表的路径。先把当前密码文件复制到回滚目标，并以服务用户运行 `check`。检查通过后才停服，再同步一次最新密码文件，切回软链接，启动服务并检查 `/readyz`。各版本的日志、审计和轮转归档留在各自的 `logs/` 中。
+
+若停服后、切换链接前中断，确认 `readlink -e /opt/hydra-admin` 仍指向切换前的目录后，可直接启动该版本。
 
 ```bash
-sudo systemctl stop hydra-admin
-sudo cp -p /opt/hydra-admin/hydra-admin.previous /opt/hydra-admin/hydra-admin
-sudo cp -p /opt/hydra-admin/config.yaml.previous /opt/hydra-admin/config.yaml
-sudo -u hydra-admin sh -c 'cd /opt/hydra-admin && ./hydra-admin check --config ./config.yaml' && sudo systemctl start hydra-admin
+(
+  set -eu
+  package=hydra-admin-v2.0.1-linux-amd64
+  ready_url='http://127.0.0.1:8085/readyz'  # 按回滚目标配置填写实际 IP 和端口
+  release="/opt/$package"
+  test -L /opt/hydra-admin
+  current=$(readlink -e /opt/hydra-admin)
+  test "$current" != "$release"
+  sudo test -x "$release/hydra-admin"
+  sudo test -s "$current/state/password.hash"
+  sudo install -d -m 0700 -o hydra-admin -g hydra-admin "$release/state" "$release/logs"
+  sudo -u hydra-admin install -m 0600 "$current/state/password.hash" "$release/state/password.hash"
+  sudo -u hydra-admin "$release/hydra-admin" check --config "$release/config.yaml"
+
+  sudo systemctl stop hydra-admin
+  sudo -u hydra-admin install -m 0600 "$current/state/password.hash" "$release/state/password.hash"
+  sudo ln -sfnT -- "$package" /opt/hydra-admin
+  sudo systemctl start hydra-admin
+  sudo systemctl status hydra-admin --no-pager
+  curl -fsS --noproxy '*' --retry 5 --retry-connrefused -- "$ready_url"
+)
 ```
 
-卸载时先备份需保留的配置、密码状态、日志与审计文件。然后执行 `sudo systemctl disable --now hydra-admin`，删除 `/etc/systemd/system/hydra-admin.service` 并运行 `sudo systemctl daemon-reload`。确认备份后可删除 `/opt/hydra-admin`，再按需删除专用 `hydra-admin` 用户和组。若为管理台配置了 Nginx 路由，也要一并移除。
+### 卸载
+
+停用服务，然后删除 systemd unit、drop-in 和 `/opt/hydra-admin` 软链接。各版本目录及其中的配置、密码文件、日志和审计记录都留在原处。
+
+```bash
+(
+  set -eu
+  test -L /opt/hydra-admin
+  sudo systemctl disable --now hydra-admin
+  sudo rm -f -- /etc/systemd/system/hydra-admin.service
+  sudo rm -rf -- /etc/systemd/system/hydra-admin.service.d
+  sudo systemctl daemon-reload
+  sudo rm -- /opt/hydra-admin
+)
+```
 
 ## 从源码构建（开发）
 
